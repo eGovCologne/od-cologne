@@ -1,0 +1,8 @@
+filename = "OffeneDatenKln-2015-03-06T08-02-00"
+description = ""
+datestamp = "1425625321"
+generator = "Backup and Migrate (http://drupal.org/project/backup_migrate)"
+generatorversion = "7.x-2.x"
+sites[0][version] = "7.34"
+sites[0][name] = "Offene Daten Köln"
+sites[0][url] = "http://default/"

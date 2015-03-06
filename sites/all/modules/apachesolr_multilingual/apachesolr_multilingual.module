@@ -1,0 +1,929 @@
+<?php
+
+/**
+ * @file
+ * Multilingual search using Apache Solr.
+ *
+ * @see apachesolr.module
+ *
+ * @author Markus Kalkbrenner (mkalkbrenner) | bio.logis GmbH
+ *   @see http://drupal.org/user/124705
+ */
+
+/**
+ * Implements hook_node_insert().
+ *
+ * @return void
+ */
+function apachesolr_multilingual_node_insert($node) {
+  apachesolr_multilingual_node_update($node);
+}
+
+/**
+ * Implements hook_node_delete().
+ *
+ * @return void
+ */
+function apachesolr_multilingual_node_delete($node) {
+  apachesolr_multilingual_node_update($node);
+}
+
+/**
+ * Implements hook_node_update().
+ *
+ * @return void
+ */
+function apachesolr_multilingual_node_update($node) {
+  if (!empty($node->tnid)) {
+    foreach (apachesolr_multilingual_load_all_environments() as $environment) {
+      if ($environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations']
+        && !empty($environment['index_bundles']['node'])
+        && in_array($node->type, $environment['index_bundles']['node'])
+      ) {
+        $translations = translation_node_get_translations($node->tnid);
+        foreach ($translations as $node_stub) {
+          if ($node_stub->nid != $node->nid) {
+            apachesolr_mark_entity('node', $node_stub->nid);
+          }
+        }
+        return;
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_apachesolr_index_documents_alter().
+ */
+function apachesolr_multilingual_apachesolr_index_documents_alter(&$documents, $entity, $entity_type, $env_id) {
+  static $reentrance = TRUE;
+  // The variable $reentrance forbids recursive calls if set to FALSE.
+  if (!$reentrance) {
+    return;
+  }
+
+  $environment = apachesolr_multilingual_environment_load($env_id);
+  $settings = $environment['conf']['apachesolr_multilingual_index_settings'];
+  if ($settings['apachesolr_multilingual_index']) {
+
+    global $language_content;
+    $languages = language_list();
+
+    foreach ($documents as $document) {
+
+      if (LANGUAGE_NONE == $document->ss_language) {
+        // language-neutral
+        $document->ss_language = $settings['apachesolr_multilingual_map_language_neutral'];
+      }
+
+      if (LANGUAGE_NONE == $document->ss_language) {
+        // Do not create special fields for language neutral ("und").
+        continue;
+      }
+
+      switch ($entity_type) {
+        case 'node':
+          if (module_exists('entity_translation')
+            && entity_translation_enabled($entity_type)
+            && entity_translation_enabled_bundle($entity_type, $entity->type)) {
+
+            /////////////////////
+            // entity translation
+            /////////////////////
+
+            $entity_info = entity_get_info($entity_type);
+            $translations_key = $entity_info['entity keys']['translations'];
+            $original_langcode = $entity->language;
+            $additional_documents_langcodes = array();
+            foreach ($entity->{$translations_key}->data as $langcode => $entity_translation) {
+              if ($langcode != $original_langcode) {
+                $additional_documents_langcodes[$langcode] = $langcode;
+                if ($settings['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations']) {
+                  // Temporarily switch the language context for apachesolr_index_node_solr_document(),
+                  // which is not aware of entity_translation.
+                  $entity->language = $langcode;
+                  $language_content = $languages[$langcode];
+                  apachesolr_multilingual_index_node_translation($document, $entity, $env_id);
+                  $entity->language = $original_langcode;
+                  $language_content = $languages[$original_langcode];
+                }
+              }
+            }
+
+            if (module_exists('title')) {
+              // Always override the title / label if title module is active.
+              $document->label = apachesolr_clean_text(title_entity_label($entity, 'node', $document->ss_language));
+            }
+
+            // Create an index entry for each language to node has been translated to.
+            // The id gets a language suffix to be unique.
+            foreach ($additional_documents_langcodes as $langcode) {
+              // Prevent endless recursion if language specific document has been created already
+              // and $reentrance is set to TRUE.
+              if (!array_key_exists($document->id, $documents)) {
+                // Temporarily switch the language context for apachesolr_index_node_solr_document(),
+                // which is not aware of entity_translation.
+                $original_langcode = $entity->language;
+                $entity->language = $langcode;
+                $language_content = $languages[$langcode];
+
+                $id = $document->id . '/' . $langcode;
+                $additional_documents = array();
+                $additional_documents[$id] = clone $document;
+
+                $reentrance = FALSE;
+                // apachesolr_convert_entity_to_documents() calls hook_apachesolr_index_documents_alter().
+                // The variable $reentrance avoids an endless recursion.
+                $tmp_documents = apachesolr_convert_entity_to_documents($entity, $entity_type, $env_id);
+                $reentrance = TRUE;
+
+                $basic_fields = reset($tmp_documents);
+
+                foreach ($basic_fields->getFieldNames() as $field) {
+                  $additional_documents[$id]->$field = $basic_fields->$field;
+                }
+
+                $additional_documents[$id]->id = $id;
+
+                apachesolr_index_node_solr_document($additional_documents[$id], $entity, $entity_type, $env_id);
+
+                // Recursive call to deal with 'apachesolr_multilingual_index_translations' aka CLIR and title field, see above and below
+                apachesolr_multilingual_apachesolr_index_documents_alter($additional_documents, $entity, $entity_type, $env_id);
+
+                $entity->language = $original_langcode;
+                $language_content = $languages[$original_langcode];
+
+                foreach ($additional_documents as $key => $additional_document) {
+                  $documents[$key] = $additional_document;
+                }
+              }
+            }
+          }
+          elseif ($settings['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations']
+            && !empty($document->is_tnid)) {
+
+            ////////////////////////////////////////////
+            // node translation, aka content translation
+            ////////////////////////////////////////////
+
+            // TODO distinguish between published and unpublished translations
+            $translations = translation_node_get_translations($document->is_tnid);
+            foreach ($translations as $node_stub) {
+              if ($node_stub->nid != $document->entity_id) {
+                if ($translation_node = node_load($node_stub->nid)) {
+                  apachesolr_multilingual_index_node_translation($document, $translation_node, $env_id);
+                  // TODO is it possible to combine node and entity translation?
+                }
+              }
+            }
+          }
+          break;
+
+        default:
+          watchdog('Apache Solr', t('Apache Solr Multilingual does not fully support indexing entities of type %type.', array('%type' => $entity_type)), NULL, WATCHDOG_NOTICE);
+      }
+
+      apachesolr_multilingual_copy_common_to_i18n_fields($document, $document);
+    }
+  }
+}
+
+function apachesolr_multilingual_copy_common_to_i18n_fields($src_document, $dst_document) {
+  $fields = $src_document->getFieldNames();
+
+//       if (in_array('vid', $fields) && is_array($document->vid)) { // vid is vocabulary id in this case
+//         $term_languages = array($language);
+//         if (module_exists('i18n_taxonomy') && variable_get('apachesolr_multilingual_index_term_translations', 0)) {
+//           $term_languages = variable_get('apachesolr_multilingual_languages', array());
+//         }
+//         foreach ($term_languages as $term_language) {
+//           if ($term_language) {
+//             $vids = array_unique($document->vid);
+//             $terms = array();
+//             foreach ($vids as $vid) {
+//               if (module_exists('i18n_taxonomy')) {
+//                 $tmp = '';
+//                 if (in_array('im_vid_' . $vid, $fields)) {
+//                   foreach ($document->{'im_vid_' . $vid} as $tid) {
+//                     $term = i18nstrings("taxonomy:term:$tid:name", '', $term_language);
+//                     if (!empty($term)) {
+//                       $tmp .= $term . ' ';
+//                     }
+//                   }
+//                 }
+//                 if (!empty($tmp)) {
+//                   $terms[] = $tmp;
+//                 }
+//               }
+//               else {
+//                 // module i18n_taxonomy isn't installed
+//                 // in this case we simply copy the terms
+//                 if (in_array('ts_vid_' . $vid . '_names', $fields)) {
+//                   $terms[] = $document->{'ts_vid_' . $vid . '_names'};
+//                 }
+//                 // REVIEW see http://drupal.org/node/783924
+//               }
+//             }
+
+//             if ($terms) {
+//               $document->{'taxonomy_names_' . $term_language} = $terms;
+//             }
+//           }
+//         }
+//       }
+
+  // use language-specific stemming and so on
+  // by copying all fields of type text to
+  // a language-specific text field
+  if (in_array('label', $fields)) {
+    $dst_document->{'i18n_label_' . $src_document->ss_language} = $src_document->label;
+  }
+  if (in_array('teaser', $fields)) {
+    $dst_document->{'i18n_teaser_' . $src_document->ss_language} = $src_document->teaser;
+  }
+  if (in_array('content', $fields)) {
+    $dst_document->{'i18n_content_' . $src_document->ss_language} = $src_document->content;
+  }
+  if (in_array('path_alias', $fields)) {
+    $dst_document->{'i18n_path_alias_' . $src_document->ss_language} = $src_document->path_alias;
+  }
+  foreach ($fields as $field_name) {
+    foreach (array('ts_', 'tm_', 'tos_', 'tom_', 'tags_') as $prefix) {
+      if (strpos($field_name, $prefix) === 0 && !empty($src_document->{$field_name})) {
+        // search for existing language identifier at second position
+        $tmp = explode('_', $field_name);
+        if ($src_document->ss_language != $tmp[1]) {
+          // Dynamic fields have to be prefixed with 'i18n_' to distinguish between
+          // language-specific dynamic fields and standard dynamic fields.
+          // The language suffix is not enough, because someone could define a
+          // drupal field name like 'de_foo', which matches ts_de_* but not i18n_ts_*
+          $dst_document->{'i18n_' . $tmp[0] . '_' . $src_document->ss_language . drupal_substr($field_name, drupal_strlen($tmp[0]))} = $src_document->{$field_name};
+        }
+      }
+    }
+  }
+}
+
+function apachesolr_multilingual_index_node_translation($document, $translation_node, $env_id) {
+  $translation_document = new ApacheSolrDocument();
+  apachesolr_index_node_solr_document($translation_document, $translation_node, 'node', $env_id);
+  apachesolr_multilingual_copy_common_to_i18n_fields($translation_document, $document);
+}
+
+/**
+ * Implements hook_form_apachesolr_search_bias_form_alter().
+ *
+ * @param $form
+ * @param $state
+ * @param $form_id
+ * @return mixed
+ */
+function apachesolr_multilingual_form_apachesolr_search_bias_form_alter(&$form, &$form_state, $form_id) {
+  $environment = apachesolr_multilingual_environment_load($form['#env_id']);
+  $fields = apachesolr_search_get_fields($environment);
+  $unspecified_types = $types = array('text', 'text_und');
+  $defaults = array();
+  foreach (array_keys(apachesolr_multilingual_language_list()) as $language_id) {
+    $types[] = 'text_' . $language_id;
+    // get the current weights
+    $defaults['i18n_content_' . $language_id] = '1.0';
+    $defaults['i18n_ts_' . $language_id . '_comments'] = '0.5';
+    $defaults['i18n_tos_' . $language_id . '_content_extra'] = '0.1';
+    $defaults['i18n_label_' . $language_id] = '5.0';
+    $defaults['i18n_tos_' . $language_id . '_name'] = '3.0';
+    $defaults['i18n_taxonomy_names_' . $language_id] = '2.0';
+    $defaults['i18n_tags_' . $language_id . '_h1'] = '5.0';
+    $defaults['i18n_tags_' . $language_id . '_h2_h3'] = '3.0';
+    $defaults['i18n_tags_' . $language_id . '_h4_h5_h6'] = '2.0';
+    $defaults['i18n_tags_' . $language_id . '_inline'] = '1.0';
+    $defaults['i18n_tags_' . $language_id . '_a'] = '0';
+  }
+
+  $qf = apachesolr_environment_variable_get($environment['env_id'], 'field_bias', $defaults);
+  if (!$qf) {
+    $qf = $defaults;
+  }
+  if ($fields) {
+    foreach ($fields as $field_name => $field) {
+      // Only indexed fields are searchable.
+      if (in_array($field->type, $types) && $field->schema{0} == 'I') {
+        $form['field_bias'][$field_name]['#access'] = TRUE;
+        $form['field_bias'][$field_name]['#default_value'] = isset($qf[$field_name]) ? $qf[$field_name] : '0';
+        $form['field_bias'][$field_name]['#description'] = in_array($field->type, $unspecified_types) ?
+          t('Unspecified language: recommendation is set this bias to "Omit"') : '';
+      }
+    }
+
+    // Make sure all the default fields are included, even if they have
+    // no indexed content.
+    foreach ($defaults as $field_name => $weight) {
+      $form['field_bias'][$field_name] = array(
+        '#type' => 'select',
+        '#options' => $form['field_bias']['content']['#options'],
+        '#title' => filter_xss(apachesolr_field_name_map($field_name)),
+        '#default_value' => isset($qf[$field_name]) ? $qf[$field_name] : $defaults[$field_name],
+      );
+    }
+
+    ksort($form['field_bias']);
+  }
+}
+
+/**
+ * Implements hook_apachesolr_field_name_map_alter().
+ */
+function apachesolr_multilingual_apachesolr_field_name_map_alter(&$map) {
+  foreach (apachesolr_multilingual_language_list() as $language => $language_name) {
+    $map['i18n_content_' . $language] = $language_name . ': ' . t('The full, rendered content (e.g. the rendered node body)');
+    $map['i18n_ts_' . $language . '_comments'] = $language_name . ': ' . t('The rendered comments associated with a node');
+    $map['i18n_tos_' . $language . '_content_extra'] = $language_name . ': ' . t('Extra rendered content or keywords');
+    $map['i18n_tos_' . $language . '_name_formatted'] = $language_name . ': ' . t('Author name (Formatted)');
+    $map['i18n_label_' . $language] = $language_name . ': ' . t('Title or label');
+    $map['i18n_teaser_' . $language] = $language_name . ': ' . t('Teaser or preview');
+    $map['i18n_tos_' . $language . '_name'] = $language_name . ': ' . t('Author name');
+    $map['i18n_path_alias_' . $language] = $language_name . ': ' . t('Path alias');
+    $map['i18n_tags_h1_' . $language] = $language_name . ': ' . t('Body text inside H1 tags');
+    $map['i18n_tags_h2_h3_' . $language] = $language_name . ': ' . t('Body text inside H2 or H3 tags');
+    $map['i18n_tags_h4_h5_h6_' . $language] = $language_name . ': ' . t('Body text inside H4, H5, or H6 tags');
+    $map['i18n_tags_inline_' . $language] = $language_name . ': ' . t('Body text in inline tags like EM or STRONG');
+    $map['i18n_tags_a_' . $language] = $language_name . ': ' . t('Body text inside links (A tags)');
+//     if (module_exists('taxonomy')) {
+//      $map['taxonomy_names' => t('All taxonomy term names'),
+//       foreach (taxonomy_get_vocabularies() as $vocab) {
+//         $map['tm_vid_' . $vocab->vid . '_names'] = t('Taxonomy term names only from the %name vocabulary', array('%name' => $vocab->name));
+//         $map['im_vid_' . $vocab->vid] = t('Taxonomy term IDs from the %name vocabulary', array('%name' => $vocab->name));
+//       }
+//     }
+//   }
+  }
+}
+
+function apachesolr_multilingual_get_language_filters_by_query($query) {
+  $filter_languages = array();
+  $language_filters = $query->getFilters('ss_language');
+  if (!empty($language_filters)) {
+    foreach ($language_filters as $language_filter) {
+      $filter_languages[] = $language_filter['#value'];
+    }
+  }
+  foreach ($query->getFilterSubQueries() as $sub_query) {
+    $filter_languages = array_merge($filter_languages,
+      apachesolr_multilingual_get_language_filters_by_query($sub_query));
+  }
+  return array_unique($filter_languages);
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ *
+ * Move apachesolr_multilingual_apachesolr_query_alter() to the end of the
+ * list because we haveto wait if someone limits the query to a specific
+ * language.
+ */
+function apachesolr_multilingual_module_implements_alter(&$implementations, $hook) {
+  if ('apachesolr_query_alter' == $hook) {
+    $group = $implementations['apachesolr_multilingual'];
+    unset($implementations['apachesolr_multilingual']);
+    $implementations['apachesolr_multilingual'] = $group;
+  }
+}
+
+/**
+ * Implements hook_apachesolr_modify_query().
+ */
+function apachesolr_multilingual_apachesolr_query_alter($query) {
+  global $language_content;
+
+  $context = $query->getContext();
+  $environment = apachesolr_multilingual_environment_load($context['env_id']);
+  $settings = $environment['conf']['apachesolr_multilingual_index_settings'];
+  if ($settings['apachesolr_multilingual_index']) {
+
+    $search_page = apachesolr_search_page_load($context['page_id']);
+    $custom_settings = $search_page['settings'];
+    apachesolr_multilingual_search_page_settings_add_defaults($custom_settings);
+    $filter_languages = &drupal_static('apachesolr_multilingual_filter_languages_' . $context['page_id']);
+    $filter_languages = apachesolr_multilingual_get_language_filters_by_query($query);
+    $languages = apachesolr_multilingual_language_list();
+
+    if (empty($filter_languages) && $custom_settings['apachesolr_multilingual_auto_language_filter'] &&
+      (!$custom_settings['apachesolr_multilingual_auto_language_filter_detachable'] ||
+        ($custom_settings['apachesolr_multilingual_auto_language_filter_detachable'] && empty($_GET['detach-auto-language-filter'])))) {
+
+      if (!empty($language_content->language)) {
+        $filter_languages[] = $language_content->language;
+        if ($custom_settings['apachesolr_multilingual_show_language_undefined_results']) {
+          $subquery = apachesolr_drupal_query('Multilingual Language Limit');
+          $subquery->addFilter('ss_language', $language_content->language);
+          $subquery->addFilter('ss_language', LANGUAGE_NONE);
+          $subquery->operator = 'OR'; // that's the default, but this way it's readable
+          $query->addFilterSubQuery($subquery);
+        }
+        else {
+          $query->addFilter('ss_language', $language_content->language);
+        }
+      }
+    }
+
+    $qf = $query->getParam('qf');
+
+    foreach ($qf as $index => $field) {
+      if (strpos($field, 'i18n_') === 0) {
+        // @see apachesolr_search_add_boost_params()
+        // We have to apply the same logic here to language specific fields.
+        if (strpos($field, 'i18n_content') === 0 || strpos($field, 'i18n_ts_') === 0 || strpos($field, 'i18n_tm_') === 0) {
+          list($field_name, $boost) = explode('^', $field);
+          // Normed fields tend to have a lower score. Multiplying by 40 is
+          // a rough attempt to bring the score in line with fields that are
+          // not normed.
+          $qf[$index] = $field_name . '^' . sprintf('%.1F', 40.0 * $boost);
+        }
+
+        if (!empty($filter_languages)) {
+          $remove = TRUE;
+          foreach ($filter_languages as $filter_language) {
+            if (preg_match('@_' . $filter_language . '(\^|_)@', $field)) {
+              $remove = FALSE;
+              break;
+            }
+          }
+          if ($remove) {
+            unset($qf[$index]);
+          }
+        }
+      }
+    }
+
+    $query->replaceParam('qf', $qf);
+
+    // Add the teaser to the result fields, because apachesolr_search_run()
+    // won't do it anymore if highlighting parameters are set here.
+    $query->addParam('fl', 'teaser');
+
+    foreach (array_keys($languages) as $language_id) {
+      if (!empty($filter_languages) && !in_array($language_id, $filter_languages)) {
+        continue;
+      }
+      $query->addParam('hl.fl', 'i18n_content_' . $language_id);
+      $query->addParam('f.' . 'i18n_content_' . $language_id . '.hl.alternateField', 'i18n_teaser_' . $language_id);
+      $query->addParam('hl.fl', 'i18n_ts_' . $language_id . '_comments');
+    }
+  }
+}
+
+
+/**
+ * Implements hook_form_search_form_alter().
+ *
+ * @param $form
+ * @param $form_state
+ */
+function apachesolr_multilingual_form_apachesolr_search_custom_page_search_form_alter(&$form, $form_state) {
+  apachesolr_multilingual_search_page_settings_add_defaults($form['#search_page']['settings']);
+  if ($form['#search_page']['settings']['apachesolr_multilingual_auto_language_filter']) {
+    $form['basic']['detach_auto_language_filter'] = array(
+      '#type' => $form['#search_page']['settings']['apachesolr_multilingual_auto_language_filter_detachable'] ? 'checkbox' : 'hidden',
+      '#title' => t('Search all languages'),
+      '#default_value' => (int) isset($_GET['detach-auto-language-filter']),
+    );
+
+    if (!isset($form['#submit']) || !is_array($form['#submit'])) {
+      $form['#submit'] = array();
+    }
+
+    array_unshift($form['#submit'], 'apachesolr_multilingual_apachesolr_search_custom_page_search_form_submit');
+  }
+}
+
+
+/**
+ * @see apachesolr_multilingual_form_search_form_alter()
+ */
+function apachesolr_multilingual_apachesolr_search_custom_page_search_form_submit($form, &$form_state) {
+  $fv = $form_state['values'];
+  if (!empty($fv['get'])) {
+    $get = json_decode($fv['get'], TRUE);
+    if (!empty($fv['detach_auto_language_filter'])) {
+      $get['detach-auto-language-filter'] = '1';
+    }
+    elseif (isset($get['detach-auto-language-filter'])) {
+      unset($get['detach-auto-language-filter']);
+    }
+
+    $form_state['values']['get'] = json_encode($get);
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * @param $form_state
+ */
+function apachesolr_multilingual_form_apachesolr_search_page_settings_form_alter(&$form, &$form_state, $form_id) {
+  $environment = apachesolr_multilingual_environment_load($form['search_page']['#value']['env_id']);
+  if (array_key_exists('apachesolr_multilingual_index_settings', $environment['conf'])
+    && $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_index'])
+  {
+    $search_page_settings = $form['search_page']['#value']['settings'];
+    // Add multilingual defaults.
+    apachesolr_multilingual_search_page_settings_add_defaults($search_page_settings);
+
+    $form['apachesolr_multilingual_query_settings'] = array(
+      '#type' => 'fieldset',
+      '#tree' => TRUE,
+      '#title' => t('Multilingual Query Settings'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+
+    $form['apachesolr_multilingual_query_settings']['apachesolr_multilingual_auto_language_filter'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Limit search to current language by default'),
+      '#default_value' => $search_page_settings['apachesolr_multilingual_auto_language_filter'],
+      '#description' => t('Show only search results that match the current language.'),
+    );
+
+    $form['apachesolr_multilingual_query_settings']['apachesolr_multilingual_auto_language_filter_detachable'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Limit search to current language could be disabled by user'),
+      '#default_value' => $search_page_settings['apachesolr_multilingual_auto_language_filter_detachable'],
+      '#description' => t('Displays a checkbox on search result page to search over all languages if "%limit_search" is active.', array('%limit_search' => t('Limit search to current language by default'))),
+    );
+
+    $form['apachesolr_multilingual_query_settings']['apachesolr_multilingual_show_language_undefined_results'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Show language-neutral/undefined results by default'),
+      '#default_value' => $search_page_settings['apachesolr_multilingual_show_language_undefined_results'],
+      '#description' => t('Show language-neutral/undefined results on search result page if "%limit_search" is active.', array('%limit_search' => t('Limit search to current language by default'))),
+    );
+
+    array_unshift($form['#validate'], 'apachesolr_multilingual_search_page_settings_form_validate');
+    array_unshift($form['#submit'], 'apachesolr_multilingual_search_page_settings_form_submit');
+  }
+}
+
+function apachesolr_multilingual_search_page_settings_form_validate($form, &$form_state) {
+}
+
+/**
+ * Processes apachesolr_search_page_settings_form form submissions.
+ */
+function apachesolr_multilingual_search_page_settings_form_submit($form, &$form_state) {
+  $form_state['values']['advanced'] += $form_state['values']['apachesolr_multilingual_query_settings'];
+}
+
+function apachesolr_multilingual_search_page_settings_add_defaults(&$search_page_settings) {
+  if (!$search_page_settings) {
+    $search_page_settings = array();
+  }
+  // Add multilingual defaults.
+  $search_page_settings +=
+    array(
+      'apachesolr_multilingual_auto_language_filter' => 1,
+      'apachesolr_multilingual_auto_language_filter_detachable' => 0,
+      'apachesolr_multilingual_show_language_undefined_results' => 0,
+    );
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * @param $form_state
+ */
+function apachesolr_multilingual_form_apachesolr_environment_edit_form_alter(&$form, &$form_state, $form_id) {
+  $active_languages = apachesolr_multilingual_language_list();
+  $environment = apachesolr_multilingual_environment_load($form['env_id']['#default_value']);
+
+  $form['conf']['apachesolr_multilingual_index_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Multilingual Index Settings'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_index'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('This is a multilingual index'),
+    '#default_value' => $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_index'],
+    '#description' => t('The configuration of this index has been created by Apache Solr Multilingual Config Generator'),
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_map_language_neutral'] = array(
+    '#type' => 'radios',
+    '#title' => t('Map language-neutral'),
+    '#options' => array_merge(array(LANGUAGE_NONE => t('No mapping')), $active_languages),
+    '#default_value' => $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_map_language_neutral'],
+    '#description' => t('Select a language to treat content marked as language-neutral. Language-neutral will not occur as filter option any more.'),
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('CLIR'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+    '#description' => t('<b>Cross-language information retrieval</b>. As a special feature Apache Solr Multilingual could be configured to deal with the translations of nodes and taxonomies on multilingual sites. That means that you can find content in any language no matter which language was used to enter the search phrase.'),
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Index node translations'),
+    '#default_value' => $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations'],
+    '#description' => t('All translations of a node will be added to the node itself.'),
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_unpublished_translations'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Index unpublished node translations'),
+    '#default_value' => $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_unpublished_translations'],
+    '#description' => t('Index unpublished translations, e.g. machine translations.'),
+  );
+
+  $form['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_term_translations'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Index taxonomy term translations'),
+    '#default_value' => $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_term_translations'],
+    '#description' => t('Index translations of the taxonomy terms. Requires module Taxonomy Translation which is part of !link.', array('!link' => l(t('Internationalization'), 'http://drupal.org/project/i18n'))),
+    '#disabled' => !module_exists('i18n_taxonomy'),
+  );
+
+  array_unshift($form['actions']['save']['#submit'], 'apachesolr_multilingual_environment_edit_form_submit');
+  array_unshift($form['actions']['save_edit']['#submit'], 'apachesolr_multilingual_environment_edit_form_submit');
+  array_unshift($form['actions']['test']['#submit'], 'apachesolr_multilingual_environment_edit_form_submit');
+}
+
+function apachesolr_multilingual_environment_edit_form_submit($form, &$form_state) {
+  $environment = apachesolr_multilingual_environment_load($form['env_id']['#default_value']);
+  $reindex = FALSE;
+
+  if ($form_state['values']['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_map_language_neutral'] !=
+    $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_map_language_neutral']
+  ) {
+    $reindex = TRUE;
+  }
+  if ($form_state['values']['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations'] !=
+    $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_translations']
+  ) {
+    $reindex = TRUE;
+  }
+  if ($form_state['values']['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_unpublished_translations'] !=
+    $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_unpublished_translations']
+  ) {
+    $reindex = TRUE;
+  }
+  if ($form_state['values']['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_term_translations'] !=
+    $environment['conf']['apachesolr_multilingual_index_settings']['apachesolr_multilingual_clir']['apachesolr_multilingual_index_term_translations']
+  ) {
+    $reindex = TRUE;
+  }
+
+  if ($reindex) {
+    drupal_set_message(
+      t(
+        'The changes requires you to !link_reindex your content.',
+        array('!link_reindex' => l(t('re-index'), 'admin/config/search/apachesolr/settings/'. $form['env_id']['#default_value'] . '/index'))
+      ),
+      'warning'
+    );
+  }
+}
+
+function apachesolr_multilingual_environment_load($env_id) {
+  $environment = apachesolr_environment_load($env_id);
+  apachesolr_multilingual_environment_add_defaults($environment);
+  return $environment;
+}
+
+function apachesolr_multilingual_load_all_environments() {
+  $environments = apachesolr_load_all_environments();
+  array_walk($environments, 'apachesolr_multilingual_environment_add_defaults');
+  return $environments;
+}
+
+function apachesolr_multilingual_environment_add_defaults(&$environment) {
+  if (!$environment) {
+    $environment['conf'] = array();
+  }
+
+  $environment['conf'] +=
+    array(
+      'apachesolr_multilingual_index_settings' =>
+        array(
+          'apachesolr_multilingual_index' => 1,
+          'apachesolr_multilingual_map_language_neutral' => LANGUAGE_NONE,
+          'apachesolr_multilingual_clir' =>
+            array(
+              'apachesolr_multilingual_index_translations' => 0,
+              'apachesolr_multilingual_index_unpublished_translations' => 0,
+              'apachesolr_multilingual_index_term_translations' => 0,
+            ),
+        ),
+    );
+}
+
+/**
+ * Implements hook_multilingual_settings_changed().
+ */
+function apachesolr_multilingual_multilingual_settings_changed() {
+  if (!module_exists('apachesolr_multilingual_confgen')) {
+    drupal_set_message(
+      t(
+        'Multilingual settings have been changed. Maybe you have to create a new set of configuration files, to update your solr configuration and to restart your solr server.',
+        array('!link_download' => l(t('download'), 'admin/config/search/apachesolr/confgen'))
+      ),
+      'warning'
+    );
+  }
+}
+
+/**
+ * Wrapper for locale_language_list() to ensure an alphabetical order of
+ * languages. That's important for the spellcheck.
+ */
+function apachesolr_multilingual_language_list() {
+  $languages = locale_language_list();
+  ksort($languages, SORT_ASC & SORT_STRING);
+  return $languages;
+}
+
+/**
+ *
+ * Modify the build array for any search output build by Apache Solr
+ * This includes core and custom pages and makes it very easy to modify both
+ * of them at once
+ *
+ * @param array $build
+ * @param array $search_page
+ */
+function apachesolr_multilingual_apachesolr_search_page_alter(array &$build, array $search_page) {
+  if (apachesolr_has_searched($search_page['env_id'])) {
+    $environment = apachesolr_multilingual_environment_load($search_page['env_id']);
+    $settings = $environment['conf']['apachesolr_multilingual_index_settings'];
+    if ($settings['apachesolr_multilingual_index']) {
+      $languages = apachesolr_multilingual_language_list();
+      $filter_languages = &drupal_static('apachesolr_multilingual_filter_languages_' . $search_page['page_id']);
+      // Retrieve suggestion
+      $suggestions = apachesolr_multilingual_get_search_suggestions($search_page['env_id'], $filter_languages);
+      if (!empty($suggestions)) {
+        $build['suggestions']['#links'] = array();
+        foreach ($suggestions as $language_id => $suggestion) {
+          $build['suggestions']['#links'][] = (1 == count($filter_languages) ? '' : $languages[$language_id] . ': ') .
+            l($suggestion, $search_page['search_path'] . '/' . $suggestion);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Retrieve all of the suggestions that were given after a certain search
+ * Mostly copied from @see apachesolrsearch_get_search_suggestions();
+ * @return array()
+ */
+function apachesolr_multilingual_get_search_suggestions($env_id, $filter_languages = array()) {
+  $suggestions_output = array();
+  if (apachesolr_has_searched($env_id)) {
+    $query = apachesolr_current_query($env_id);
+    $keyword = $query->getParam('q');
+    $searcher = $query->getSearcher();
+    $response = apachesolr_static_response_cache($searcher);
+    $language_ids = array_keys(apachesolr_multilingual_language_list());
+    // Get spellchecker suggestions into an array.
+    foreach ($language_ids as $language_id) {
+      if (!empty($filter_languages) && !in_array($language_id, $filter_languages)) {
+        continue;
+      }
+      if (!empty($response->{'spellcheck_' . $language_id}->suggestions)) {
+        $suggestions = get_object_vars($response->{'spellcheck_' . $language_id}->suggestions);
+        if ($suggestions) {
+          $replacements = array();
+          // Get the original query and retrieve all words with suggestions.
+          foreach ($suggestions as $word => $value) {
+            $replacements[$word] = $value->suggestion[0];
+          }
+          // Replace the keyword with the suggested keyword.
+          $suggested_keyword = strtr($keyword, $replacements);
+          // Show only if suggestion is different than current query.
+          if ($keyword != $suggested_keyword) {
+            $suggestions_output[$language_id] = $suggested_keyword;
+          }
+        }
+      }
+    }
+  }
+  return $suggestions_output;
+}
+
+/**
+ * Implements hook_apachesolr_field_mappings_alter()
+ */
+function apachesolr_multilingual_apachesolr_field_mappings_alter(&$mappings, $entity_type) {
+
+  $mappings['node_reference']['indexing_callback'] =
+    'apachesolr_multilingual_nodereference_indexing_callback';
+
+  $mappings['user_reference']['indexing_callback'] =
+    'apachesolr_multilingual_userreference_indexing_callback';
+
+  $mappings['entityreference']['indexing_callback'] =
+    'apachesolr_multilingual_entityreference_indexing_callback';
+}
+
+/**
+ *  Indexing callback for the node_reference module
+ *  by the references module
+ *
+ * @param object $entity
+ * @param string $field_name
+ * @param string $index_key
+ * @param array $field_info
+ * @return array $fields
+ */
+function apachesolr_multilingual_nodereference_indexing_callback($entity, $field_name, $index_key, array $field_info) {
+  $fields = array();
+  if (!empty($entity->{$field_name})) {
+    if (array_key_exists($entity->language, $entity->$field_name)) {
+      $index_key = apachesolr_index_key($field_info);
+      foreach ($entity->{$field_name}[$entity->language] as $reference) {
+        if ($index_value = (!empty($reference['nid'])) ? $reference['nid'] : FALSE) {
+          $fields[] = array(
+            'key' => $index_key,
+            'value' => $index_value,
+          );
+        }
+      }
+    }
+    else {
+      return apachesolr_nodereference_indexing_callback($entity, $field_name, $index_key, $field_info);
+    }
+  }
+  return $fields;
+}
+
+/**
+ *  Indexing callback for the user_reference module
+ *  by the references module
+ *
+ * @param object $entity
+ * @param string $field_name
+ * @param string $index_key
+ * @param array $field_info
+ * @return array $fields
+ */
+function apachesolr_multilingual_userreference_indexing_callback($entity, $field_name, $index_key, array $field_info) {
+  $fields = array();
+  if (!empty($entity->{$field_name})) {
+    if (array_key_exists($entity->language, $entity->$field_name)) {
+      $index_key = apachesolr_index_key($field_info);
+      foreach ($entity->{$field_name}[$entity->language] as $reference) {
+        if ($index_value = (isset($reference['uid']) && strlen($reference['uid'])) ? $reference['uid'] : FALSE) {
+          $fields[] = array(
+            'key' => $index_key,
+            'value' => $index_value,
+          );
+        }
+      }
+    }
+    else {
+      return apachesolr_userreference_indexing_callback($entity, $field_name, $index_key, $field_info);
+    }
+  }
+  return $fields;
+}
+
+/**
+ * Indexing callback for entityreference fields.
+ *
+ * @param object $entity
+ * @param string $field_name
+ * @param string $index_key
+ * @param array $field_info
+ * @return array $fields
+ *
+ */
+function apachesolr_multilingual_entityreference_indexing_callback($entity, $field_name, $index_key, $field_info) {
+  $fields = array();
+  if (!empty($entity->{$field_name})) {
+    if (array_key_exists($entity->language, $entity->$field_name)) {
+
+      // Gets entity type and index key. We need to prefix the ID with the entity
+      // type so we know what entity we are dealing with in the mapping callback.
+      $entity_type = $field_info['field']['settings']['target_type'];
+      $index_key = apachesolr_index_key($field_info);
+
+      // Iterates over all references and adds them to the fields.
+      foreach ($entity->{$field_name}[$entity->language] as $reference) {
+        #var_dump($reference);
+        if ($id = (!empty($reference['target_id'])) ? $reference['target_id'] : FALSE) {
+          $fields[] = array(
+            'key' => $index_key,
+            'value' => $entity_type . ':' . $id,
+          );
+        }
+      }
+    }
+    else {
+      return apachesolr_entityreference_indexing_callback($entity, $field_name, $index_key, $field_info);
+    }
+  }
+  return $fields;
+}

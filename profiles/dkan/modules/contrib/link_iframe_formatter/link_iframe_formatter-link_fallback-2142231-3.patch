@@ -1,0 +1,114 @@
+diff --git a/link_iframe_formatter.module b/link_iframe_formatter.module
+index 10071d5..7f4b6dc 100644
+--- a/link_iframe_formatter.module
++++ b/link_iframe_formatter.module
+@@ -16,6 +16,8 @@ function link_iframe_formatter_field_formatter_info() {
+       'settings' => array(
+         'width' => '640',
+         'height' => '480',
++        'html_check' => NULL,
++        'link_formatter' => NULL,
+       ),
+     ),
+   );
+@@ -43,6 +45,30 @@ function link_iframe_formatter_field_formatter_settings_form($field, $instance,
+     '#required' => TRUE,
+   );
+ 
++  $element['html_check'] = array(
++    '#title' => t('Fall back to link display if destination is not an HTML page'),
++    '#type' => 'checkbox',
++    '#default_value' => $settings['html_check'],
++  );
++
++  // Get our link formatter options for use if html_check is checked
++  $link_formatter_info = link_field_formatter_info();
++  $options = array();
++  foreach ($link_formatter_info as $type => $info) {
++    $options[$type] = $info['label'];
++  }
++  $element['link_formatter'] = array(
++    '#title' => t('Link format'),
++    '#type' => 'select',
++    '#options' => $options,
++    '#default_value' => $settings['link_formatter'],
++    '#states' => array(
++      'visible' => array(
++        ':input[name="fields[field_link_api][settings_edit_form][settings][html_check]"]' => array('checked' => TRUE),
++      ),
++    ),
++  );
++
+   return $element;
+ }
+ 
+@@ -51,8 +77,15 @@ function link_iframe_formatter_field_formatter_settings_form($field, $instance,
+  */
+ function link_iframe_formatter_field_formatter_settings_summary($field, $instance, $view_mode) {
+   $settings = $instance['display'][$view_mode]['settings'];
++  $link_formatter_info = link_field_formatter_info();
++  $link_fallback = $settings['html_check'] ? $link_formatter_info[$settings['link_formatter']]['label'] : t('no');
+ 
+-  $summary = t('Width : @width, Height : @height', array('@width' => $settings['width'], '@height' => $settings['height']));
++  $summary = t('Width : @width, Height : @height, Link fallback: @link_fallback', 
++               array(
++                '@width' => $settings['width'], 
++                '@height' => $settings['height'], 
++                '@link_fallback' => $link_fallback
++               ));
+ 
+   return $summary;
+ }
+@@ -64,20 +97,38 @@ function link_iframe_formatter_field_formatter_view($entity_type, $entity, $fiel
+   $elements = array();
+   foreach ($items as $delta => $item) {
+     if ($display['type'] == 'link_iframe_formatter_iframe') {
+-      $link_options = $item;
+-      unset($link_options['title']);
+-      unset($link_options['url']);
+-      $elements[$delta] = array(
+-        '#type' => 'html_tag',
+-        '#tag' => 'iframe',
+-        '#attributes' => array(
+-          'height' => $display['settings']['height'],
+-          'name' => $item['title'],
+-          'src' => url($item['url'], $link_options),
+-          'width' => $display['settings']['width'],
+-        ),
+-        '#value' => ''
+-      );
++      $link = FALSE;
++      // If we're checking for html, and check comes back negative, display as link
++      $response = drupal_http_request($item['url']);
++      if (strpos($response->headers['content-type'], 'text/html') !== 0) {
++        $link = TRUE;
++      }
++      if ($link) {
++        $item['attributes']['type'] = strstr($response->headers['content-type'], ';', TRUE);
++        $elements[$delta] = array(
++          '#theme' => 'link_formatter_' . $display['settings']['link_formatter'],
++          '#element' => $item,
++          '#field' => $instance,
++          '#display' => $display,
++        );
++      }
++      // Otherwise dispaly as iFrame
++      else {
++        $link_options = $item;
++        unset($link_options['title']);
++        unset($link_options['url']);
++        $elements[$delta] = array(
++          '#type' => 'html_tag',
++          '#tag' => 'iframe',
++          '#attributes' => array(
++            'height' => $display['settings']['height'],
++            'name' => $item['title'],
++            'src' => url($item['url'], $link_options),
++            'width' => $display['settings']['width'],
++          ),
++          '#value' => ''
++        );        
++      }
+     }
+   }
+   return $elements;

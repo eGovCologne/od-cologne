@@ -1,0 +1,76 @@
+<?php
+
+/**
+ * @file
+ * Provides Schema mapping for CKAN.
+ */
+
+/**
+ * Check if $guid is a valid uuid.
+ */ 
+function open_data_schema_ckan_is_valid_guid($guid) {
+  return !empty($guid) && preg_match('/^(\{)?[a-f\d]{8}(-[a-f\d]{4}){4}[a-f\d]{8}(?(1)\})$/i', $guid);
+}
+
+/**
+ * Implements hook_open_data_schema().
+ */
+function open_data_schema_ckan_open_data_schema() {
+  $path = DRUPAL_ROOT . '/' . drupal_get_path('module', 'open_data_schema_ckan') . '/data/schema_ckan.json';
+  return array(
+    'short_name' => 'ckan',
+    'title' => 'CKAN',
+    'schema_file' => $path,
+    'description' => t('CKAN schema. See http://ckan.org for more awesome details.'),
+  );
+}
+
+/**
+ * Implements hook_open_data_schema_map_args_alter().
+ */
+function open_data_schema_ckan_open_data_schema_map_args_alter(&$field, &$args_value){
+  // CKAN accepts either uuid as name in the id parameter
+  if($args_value['field'] === 'id' && !open_data_schema_ckan_is_valid_guid($args_value['query'])){
+    $args_value['field'] = 'name';
+    $args_value['token']['value'] = '[node:url:args:last]';
+    $field[1] = 'name';
+  }
+}
+
+/**
+ * Implements hook_open_data_schema_map_results_alter().
+ */
+function open_data_schema_ckan_open_data_schema_map_results_alter(&$result, $machine_name, $api_schema) {
+  if ($api_schema == 'ckan') {
+    // CKAN expects results wrapped in help, success, result.
+    $result = array(
+      'help' => '',
+      'success' => TRUE,
+      'result' => $result,
+    );
+    if (!$result['result']) {
+      $result['success'] = FALSE;
+    }
+    if ($machine_name == 'ckan_package_show') {
+      $result['help'] = t('Return the metadata of a dataset (package) and its resources. :param id: the id or name of the dataset :type id: string');
+    }
+    elseif ($machine_name == 'ckan_revision_list') {
+      $result['help'] = t("Return a list of the IDs of the site's revisions.\n\n :rtype: list of strings.");
+      foreach ($result['result'] as $num => $data) {
+        // This endpoint just produces a list.
+        foreach ($data as $api_field => $item) {
+          $list[] = $item;
+        }
+      }
+      $result['result'] = $list;
+    }
+    elseif ($machine_name == 'ckan_package_list') {      
+      $result['help'] = t("Return a list of the names of the site's datasets (packages).\n\n :param limit: if given, the list of datasets will be broken into pages of\n at most ``limit`` datasets per page and only one page will be returned\n at a time (optional)\n :type limit: int\n :param offset: when ``limit`` is given, the offset to start returning packages from\n :type offset: int\n\n :rtype: list of strings\n\n");
+      foreach ($result['result'] as $num => $data) {        
+        $list[] = $data['name'];        
+      }
+
+      $result['result'] = $list;
+    }    
+  }
+}

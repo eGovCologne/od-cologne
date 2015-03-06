@@ -1,0 +1,16 @@
+name = DKAN Open Data
+description = Return all datasets available in json (Open Data specification).
+package = DKAN API
+core = 7.x
+php = 5.2.4
+version = 7.x-1.0-beta1
+project = dkan_dataset
+dependencies[] = dkan_dataset
+
+
+; Information added by drush on 2013-10-20
+version = "7.x-1.0-beta2"
+core = "7.x"
+project = "dkan_dataset"
+datestamp = "1382316675"
+

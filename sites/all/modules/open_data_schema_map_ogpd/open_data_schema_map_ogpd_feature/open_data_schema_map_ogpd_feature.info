@@ -1,0 +1,11 @@
+name = Open Data Schema Map OGPD
+core = 7.x
+package = OGPD
+dependencies[] = open_data_schema_map
+dependencies[] = open_data_schema_map_dkan
+dependencies[] = open_data_schema_map_ogpd
+features[features_api][] = api:2
+features[features_override_items][] = open_data_schema_apis.ckan_package_show
+features[features_overrides][] = open_data_schema_apis.ckan_package_show.enabled
+features[open_data_schema_apis][] = ogpd_package_show
+project path = sites/all/modules/open_data_schema_map_ogpd

@@ -1,0 +1,13 @@
+name = Search ajaxified
+description = "Ajaxifies Search API pages with jQuery BBQ."
+dependencies[] = search_api
+dependencies[] = facetapi_pretty_paths
+core = 7.x
+package = Search
+
+; Information added by Drupal.org packaging script on 2014-02-16
+version = "7.x-1.2"
+core = "7.x"
+project = "search_api_ajax"
+datestamp = "1392554911"
+

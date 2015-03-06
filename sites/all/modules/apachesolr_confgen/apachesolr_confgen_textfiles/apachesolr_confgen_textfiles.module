@@ -1,0 +1,66 @@
+<?php
+
+/**
+ * @file
+ *
+ * @see apachesolr.module
+ *
+ * @author Markus Kalkbrenner (mkalkbrenner) | bio.logis GmbH
+ *   @see http://drupal.org/user/124705
+ */
+
+
+/**
+ * Implements hook_menu().
+ */
+function apachesolr_confgen_textfiles_menu() {
+  $items = array();
+
+  $items['admin/config/search/apachesolr/confgen/textfiles'] = array(
+    'title' => 'Text Files',
+    'weight' => 0,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('apachesolr_confgen_textfile_settings_form'),
+    'file' => 'apachesolr_confgen_textfiles.admin.inc',
+    'access arguments'   => array('administer search'),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_apachesolr_confgen_zip_file_alter().
+ */
+function apachesolr_confgen_textfiles_apachesolr_confgen_zip_file_alter(&$files, $solr_version) {
+  $files['admin-extra.html'] = variable_get_value('apachesolr_confgen_textfiles_admin_extra_html');
+  $files['compoundwords.txt'] = variable_get_value('apachesolr_confgen_textfiles_compoundwords_txt');
+  $files['mapping-ISOLatin1Accent.txt'] = variable_get_value('apachesolr_confgen_textfiles_mapping_isolatin1accent_txt');
+  $files['protwords.txt'] = variable_get_value('apachesolr_confgen_textfiles_protwords_txt');
+  $files['stopwords.txt'] = variable_get_value('apachesolr_confgen_textfiles_stopwords_txt');
+  $files['synonyms.txt'] = variable_get_value('apachesolr_confgen_textfiles_synonyms_txt');
+
+  if (strpos($solr_version, '3.') === 0) {
+    $files['mapping-FoldToASCII.txt'] = variable_get_value('apachesolr_confgen_textfiles_mapping_foldtoascii_txt');
+    $files['solrcore.properties'] = variable_get_value('apachesolr_confgen_textfiles_solrcore_properties');
+  }
+}
+
+/**
+ * Implements hook_variable_update().
+ */
+function apachesolr_confgen_textfiles_variable_update($name, $value, $old_value, $options) {
+  switch ($name) {
+    case 'apachesolr_confgen_textfiles_admin_extra_html':
+    case 'apachesolr_confgen_textfiles_mapping_isolatin1accent_txt':
+    case 'apachesolr_confgen_textfiles_compoundwords_txt':
+    case 'apachesolr_confgen_textfiles_protwords_txt':
+    case 'apachesolr_confgen_textfiles_stopwords_txt':
+    case 'apachesolr_confgen_textfiles_synonyms_txt':
+    case 'apachesolr_confgen_textfiles_mapping_foldtoascii_txt':
+    case 'apachesolr_confgen_textfiles_solrcore_properties':
+      apachesolr_confgen_message_new_config($name, $value, $old_value, $options);
+      break;
+  }
+}

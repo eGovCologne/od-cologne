@@ -1,0 +1,162 @@
+<?php
+
+/**
+ * @file
+ * Generator for Apache Solr Configuration Files.
+ *
+ * @see apachesolr.module
+ *
+ * @author Markus Kalkbrenner (mkalkbrenner) | bio.logis GmbH
+ *   @see http://drupal.org/user/124705
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function apachesolr_confgen_menu() {
+
+  $items['admin/config/search/apachesolr/confgen'] = array(
+    'title' => 'Config File Generation',
+    'weight' => 20,
+    'access arguments' => array('administer search'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('apachesolr_confgen_form'),
+    'file' => 'apachesolr_confgen.admin.inc',
+    'access arguments' => array('administer search'),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  $items['admin/config/search/apachesolr/confgen/download'] = array(
+    'title' => 'Config File Download',
+    'weight' => 20,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_variable_realm_info().
+ */
+function apachesolr_confgen_variable_realm_info() {
+  $realm['solr_version'] = array(
+    'title' => t('Solr Version'),
+    'weight' => 110,
+    'controller class' => 'SolrVersionRealm',
+    'store class' => 'VariableStoreRealmStore',
+    'keys' => array('1.4.x' => 'solr 1.4.x', '3.5.x' => 'solr 3.5.x and 3.6.x'),
+    'default key' => '1.4.x',
+    'select' => FALSE,
+    'variable name' => t('solr version dependent'),
+    'variable class' => 'solr-version-dependent',
+    'form settings' => TRUE,
+    'form switcher' => TRUE,
+  );
+
+  return $realm;
+}
+
+function apachesolr_confgen_get_local_path($solr_version = '1.4.x') {
+  $local_path = '';
+  switch ($solr_version) {
+    case '1.4.x':
+      $local_path = 'solr-1.4/';
+      break;
+    case '3.5.x':
+      $local_path = 'solr-3.x/';
+      break;
+  }
+  return $local_path;
+}
+
+function apachesolr_confgen_get_original_qp($type, $solr_version = '1.4.x') {
+  $local_path = apachesolr_confgen_get_local_path($solr_version);
+
+  // TODO error handling
+  if ($local_path) {
+    return qp(apachesolr_confgen_load_xml_file($local_path . $type . '.xml'), NULL, array('use_parser' => 'xml'));
+  }
+}
+
+function apachesolr_confgen_clone_qp($qp) {
+  return qp($qp->find(':root')->xml(),  NULL, array('use_parser' => 'xml'));
+}
+
+function apachesolr_confgen_load_config_file($file) {
+  $solr_conf_path = drupal_get_path('module', 'apachesolr_confgen') . '/solr-conf/';
+
+  if (!file_exists($solr_conf_path . $file)) {
+    $solr_conf_path = drupal_get_path('module', 'apachesolr') . '/solr-conf/';
+  }
+
+  // TODO error handling
+  return file_get_contents($solr_conf_path . $file);
+}
+
+/**
+ * Loads raw xml file and resolves xi:includes
+ */
+function apachesolr_confgen_load_xml_file($file) {
+  $xml = apachesolr_confgen_load_config_file($file);
+  if (preg_match_all('@<xi:include[^>]+?href="([^"]+?)".*?</xi:include>@s', $xml, $matches)) {
+    $dirname = dirname($file);
+    foreach ($matches[0] as $key => $xi_include) {
+      $xml = str_replace($xi_include, apachesolr_confgen_load_xml_file($dirname . '/' . $matches[1][$key]), $xml);
+    }
+  }
+  return $xml;
+}
+
+/**
+ * Shows a hint to the user to use the new configurations
+ */
+function apachesolr_confgen_message_new_config($name, $value, $old_value, $options) {
+  static $msg_sent = FALSE;
+
+  if (!$msg_sent) {
+    if ($value != $old_value) {
+      $info = variable_get_info($name);
+      if (is_null($info)) {
+        // ignore for now
+        // drupal_set_message(t('Error: Unknown variable @varname.', array('@varname' => $name)), 'error');
+      }
+      else {
+        drupal_set_message(
+          t(
+            'Changing "%title" will require you to !link_download a new set of configuration files, update your Solr configuration, restart your Solr server and !link_delete the index.',
+            array('%title' => $info['title'] . (array_key_exists('key', $options) ? ' (' . $options['key'] . ')' : ''), '!link_download' => l(t('download'), 'admin/config/search/apachesolr/confgen'), '!link_delete' => l(t('delete'), 'admin/config/search/apachesolr'))
+          ),
+          'warning'
+        );
+
+        $msg_sent = TRUE;
+      }
+    }
+  }
+}
+
+function apachesolr_confgen_message_new_config_no_delete($name, $value, $old_value, $options) {
+  static $msg_sent = FALSE;
+
+  if (!$msg_sent) {
+    if ($value != $old_value) {
+      $info = variable_get_info($name);
+      if (is_null($info)) {
+        // ignore for now
+        // drupal_set_message(t('Error: Unknown variable @varname.', array('@varname' => $name)), 'error');
+      }
+      else {
+        drupal_set_message(
+          t(
+            'Changing "%title" will require you to !link_download a new set of configuration files, update your Solr configuration and restart your Solr server.',
+            array('%title' => $info['title'] . (array_key_exists('key', $options) ? ' (' . $options['key'] . ')' : ''), '!link_download' => l(t('download'), 'admin/config/search/apachesolr/confgen'))
+          ),
+          'warning'
+        );
+
+        $msg_sent = TRUE;
+      }
+    }
+  }
+}
+

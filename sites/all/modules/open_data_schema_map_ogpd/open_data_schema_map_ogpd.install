@@ -1,0 +1,28 @@
+<?php
+/**
+ * @file
+ * Install file for OGPD schema.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function open_data_schema_map_ogpd_install() {
+  // Fix issue with reference field.
+  $query = db_query('SELECT distinct(field_dataset_ref_target_id) FROM {field_data_field_dataset_ref}');
+  $result = $query->fetchAll();
+  foreach ($result as $item) {
+    $dataset_query = db_query('SELECT entity_id FROM {field_data_field_dataset_ref} WHERE field_dataset_ref_target_id = :nid', array(':nid' => $item->field_dataset_ref_target_id));
+    $dataset_results = $dataset_query->fetchAll();
+    foreach ($dataset_results as $dataset_result) {
+      $final[$item->field_dataset_ref_target_id][]['target_id'] = $dataset_result->entity_id;
+    }
+  }
+  foreach ($final as $dataset_nid => $resource_nids) {
+    $node = node_load($dataset_nid);
+    if ($node) {
+      $node->field_resources['und'] = $resource_nids;
+      node_save($node);
+    }
+  }
+}

@@ -1,0 +1,8 @@
+<?php
+
+/**
+ * Implements of hook_views_api().
+ */
+function views_term_path_views_api() {
+  return array('api' => 3);
+}

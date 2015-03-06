@@ -1,0 +1,16 @@
+name = Dkan CGN Views
+core = 7.x
+package = DKAN CGN
+version = 7.x-1.1
+project = dkan_cgn_views
+dependencies[] = context
+dependencies[] = views
+features[context][] = block-icons
+features[ctools][] = context:context:3
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:2
+features[views_view][] = blog_list
+features[views_view][] = blog_splash
+features[views_view][] = categories
+features[views_view][] = datasets_start
+features_exclude[dependencies][ctools] = ctools

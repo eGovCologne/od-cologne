@@ -1,0 +1,26 @@
+Apache Solr Config Generator 7.x-1.0-beta1, 2013-05-10
+-------------------------------------------------------
+[        ] mkalkbrenner: added config buttons to module page
+[#1860652] jongagne, mkalkbrenner: Downloaded schema.xml and solrconfig.xml are blank as of apachesolr 7.x-1.1
+[        ] mkalkbrenner: handle solrcore.properties file
+[        ] mkalkbrenner: resolve xi:include in xml files
+[        ] mkalkbrenner: hide "Data Dir" input field if "Disable Data Dir setting" is enabled
+
+
+Apache Solr Config Generator 7.x-1.0-alpha2, 2012-09-03
+-------------------------------------------------------
+[       ] mkalkbrenner: fixed package of Apache Solr Advanced Settings
+[       ] mkalkbrenner: migrated apachesolr_confgen_advanced_settings to leverage the features of the variable module
+[       ] mkalkbrenner: added sub module apachesolr_confgen_textfiles
+[       ] mkalkbrenner: added support for currency.xml and elevate.xml
+[       ] mkalkbrenner: provide messages about re-indexing or server restart required, no matter where corresponding variables are modified
+[       ] mkalkbrenner: added apachesolr_confgen_variable_realm_aware_module_form() as work around until https://drupal.org/node/1737126 gets committed
+
+
+Apache Solr Config Generator 7.x-1.0-alpha1, 2012-08-05
+-------------------------------------------------------
+[#931950] mkalkbrenner: moved generic part of config file generation from Apache Solr Multilingual into this module
+[       ] mkalkbrenner: moved advanced solr settings from Apache Solr Multilingual into this module
+[       ] mkalkbrenner: moved validators from Apache Solr Multilingual into this module
+[       ] mkalkbrenner: implemented download of zip file containing all config files
+[       ] mkalkbrenner: added API documentation

@@ -1,0 +1,78 @@
+<?php
+
+/**
+ * @file
+ *
+ * @see apachesolr.module
+ *
+ * @author Markus Kalkbrenner (mkalkbrenner) | bio.logis GmbH
+ *   @see http://drupal.org/user/124705
+ */
+
+
+/**
+ * Implements hook_menu().
+ */
+function apachesolr_confgen_advanced_settings_menu() {
+  $items = array();
+
+  $items['admin/config/search/apachesolr/confgen/advanced_settings'] = array(
+    'title' => 'Advanced Solr Settings',
+    'weight' => 0,
+    'page callback' => 'drupal_get_form',
+    // see https://drupal.org/node/1737126
+    'page arguments' => array('variable_module_form', 'apachesolr_confgen_advanced_settings'),
+    'access arguments' => array('administer search'),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_form_search_form_alter().
+ *
+ * @param $form
+ * @param $form_state
+ */
+function apachesolr_confgen_advanced_settings_form_variable_module_form_alter(&$form, $form_state) {
+  if ('apachesolr_confgen_advanced_settings' == $form['#variable_module_form']) {
+    $form['apachesolr_confgen_advanced_settings_dataDir']['#states'] = array(
+      // Hide this field when the 'Disable Data Dir setting' is enabled.
+      'invisible' => array(
+        ':input[name="apachesolr_confgen_advanced_settings_disable_dataDir"]' => array('checked' => TRUE),
+      ),
+    );
+  }
+}
+
+
+/**
+ * Implements hook_apachesolr_confgen_solrconfig_alter().
+ */
+function apachesolr_confgen_advanced_settings_apachesolr_confgen_solrconfig_alter($qp, $solr_version) {
+  if (!variable_get('apachesolr_confgen_advanced_settings_disable_dataDir', 1)) {
+    $qp
+      ->find(':root indexDefaults')
+      ->before('<dataDir>' . variable_get_value('apachesolr_confgen_advanced_settings_dataDir') . '</dataDir>');
+  }
+
+  $qp
+    ->find(':root maxTime')
+    ->text(variable_get_value('apachesolr_confgen_advanced_settings_autoCommit_maxTime'));
+}
+
+
+/**
+ * Implements hook_variable_update().
+ */
+function apachesolr_confgen_advanced_settings_variable_update($name, $value, $old_value, $options) {
+  switch ($name) {
+    case 'apachesolr_confgen_advanced_settings_disable_dataDir':
+    case 'apachesolr_confgen_advanced_settings_dataDir':
+    case 'apachesolr_confgen_advanced_settings_autoCommit_maxTime':
+      apachesolr_confgen_message_new_config_no_delete($name, $value, $old_value, $options);
+      break;
+  }
+}

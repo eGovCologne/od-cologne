@@ -1,0 +1,87 @@
+<?php
+
+/**
+ * Implements hook_install().
+ */
+function fuzzysearch_install() {
+//  drupal_set_message(st('Fuzzy Search has been installed and a basic server and index created. Please run cron to index your site. You must add a Search Page or a View to use Fuzzy search.'));
+  // Create default server and index.
+  $file = DRUPAL_ROOT . '/' . drupal_get_path('module', 'fuzzysearch') . "/includes/fuzzysearch.default.inc";
+  if (is_file($file)) {
+    require_once $file;
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function fuzzysearch_uninstall() {
+  if (module_exists('search_api')) {
+    $query = db_select('search_api_server', 's');
+    $query->addField('s', 'machine_name');
+    $query->condition('class', 'fuzzysearch_service');
+    if ($servers = $query->execute()->fetchAssoc()) {
+      foreach ($servers as $server) {
+        // Delete indexes.
+        db_delete('search_api_index')
+          ->condition('server', $server)
+          ->execute();
+      }
+    }
+  }
+  db_delete('search_api_server')
+    ->condition('class', 'fuzzysearch_service')
+    ->execute();
+  foreach (db_find_tables(Database::getConnection()->prefixTables('{fuzzysearch}') . '%') as $table) {
+    if (preg_match('/fuzzysearch_.*$/', $table, $matches)) {
+      db_drop_table($matches[0]);
+    }
+  }
+}
+
+/**
+ * Implements hook_disable().
+ */
+function fuzzysearch_disable() {
+  $query = db_select('search_api_server', 's');
+  $query->addField('s', 'machine_name');
+  $query->condition('class', 'fuzzysearch_service');
+  $servers = $query->execute()->fetchAssoc();
+  foreach ($servers as $server) {
+    // Disable indexes.
+    db_update('search_api_index')
+      ->condition('server', $server)
+      ->fields(array('enabled' => 0))
+      ->execute();
+  }
+  // Disable the servers.
+  db_update('search_api_server')
+    ->condition('class', 'fuzzysearch_service')
+    ->fields(array('enabled' => 0))
+    ->execute();
+}
+
+/**
+ * Implements hook_enable().
+ */
+function fuzzysearch_enable() {
+//  $servers = search_api_get_service_info(FALSE);
+//  foreach ($servers as $server) {
+//    if ($server->class == 'FuzzySearchService') {
+//      // Enable the servers.
+//      search_api_server_enable($server->id);
+//      // Enable indexes.
+//      $indexes = search_api_index_load_multiple(FALSE, $conditions = array('server' => $server->machine_name));
+//      foreach ($indexes as $index) {
+//        search_api_index_enable($index->id);
+//        // Enable any search pages.
+//        if (module_exists('search_api_page')) {
+//          db_update('search_api_page')
+//              ->condition('index_id', $index->machine_name)
+//              ->fields(array('enabled' => 1))
+//              ->execute();
+//        }
+//      }
+//    }
+//  }
+}

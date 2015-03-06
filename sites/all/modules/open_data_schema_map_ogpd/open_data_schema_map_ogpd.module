@@ -1,0 +1,74 @@
+<?php
+
+/**
+ * @file
+ * Provides Schema mapping for OGDP CKAN.
+ */
+
+/**
+ * Implements hook_open_data_schema().
+ */
+function open_data_schema_map_ogpd_open_data_schema() {
+  $path = DRUPAL_ROOT . '/' . drupal_get_path('module', 'open_data_schema_map_ogpd') . '/data/OGPD_JSON_Schema.json';
+  return array(
+    'short_name' => 'ogpd',
+    'title' => 'OGDP CKAN',
+    'schema_file' => $path,
+    'description' => t('OGDP CKAN schema.'),
+  );
+}
+
+/**
+ * Implements hook_open_data_schema_map_args_alter().
+ */
+function open_data_schema_map_ogpd_open_data_schema_map_args_alter(&$field, &$args_value) {
+  // CKAN accepts either uuid as name in the id parameter.
+  if ($args_value['field'] === 'id' && !open_data_schema_ckan_is_valid_guid($args_value['query'])){
+    $args_value['field'] = 'name';
+    $args_value['token']['value'] = '[node:url:args:last]';
+    $field[1] = 'name';
+  }
+}
+
+/**
+ * Implements hook_open_data_schema_map_results_alter().
+ */
+function open_data_schema_map_ogpd_open_data_schema_map_results_alter(&$result, $machine_name, $api_schema) {
+  if ($api_schema == 'ogpd') {
+
+    // Adds additional date items.
+    $nid = db_query("SELECT nid from {node} WHERE uuid = :uuid LIMIT 1", array(":uuid" => $result[0]['id']))->fetchField();
+    $node = node_load($nid);
+    $result[0]['extras']['dates'] = array($result[0]['extras']['dates']);
+    $result[0]['extras']['dates'][] = array('role' => 'veroeffentlicht', 'date' => format_date($node->created, 'medium'));
+    $result[0]['extras']['dates'][] = array('role' => 'aktualisiert', 'date' => format_date($node->changed, 'medium'));
+    foreach ($result[0]['extras'] as $key => $value) {
+      if (!$value) {
+        unset($result[0]['extras'][$key]);
+      }
+    }
+
+    // CKAN expects results wrapped in help, success, result.
+    $result = array(
+      'help' => '',
+      'success' => TRUE,
+      'result' => $result,
+    );
+    if (!$result['result']) {
+      $result['success'] = FALSE;
+    }
+    if ($machine_name == 'ogpd_package_show') {
+      $result['help'] = t('Return the metadata of a dataset (package) and its resources. :param id: the id or name of the dataset :type id: string');
+    }
+    elseif ($machine_name == 'ogpd_revision_list') {
+      $result['help'] = t("Return a list of the IDs of the site's revisions.\n\n :rtype: list of strings.");
+      foreach ($result['result'] as $num => $data) {
+        // This endpoint just produces a list.
+        foreach ($data as $api_field => $item) {
+          $list[] = $item;
+        }
+      }
+      $result['result'] = $list;
+    }
+  }
+}

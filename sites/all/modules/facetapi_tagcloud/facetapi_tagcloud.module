@@ -1,0 +1,51 @@
+<?php
+
+/**
+ * @file
+ * A Facet API widget that displays facet items as tagadelic links.
+ */
+
+/**
+ * Implements hook_facetapi_widgets().
+ */
+function facetapi_tagcloud_facetapi_widgets() {
+  return array(
+    'facetapi_tagcloud' => array(
+      'handler' => array(
+        'label' => t('Tagcloud links'),
+        'class' => 'FacetapiWidgetTagcloud',
+        'query types' => array('term'),
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function facetapi_tagcloud_theme() {
+  return array(
+    'facetapi_tagcloud_link_active' => array(
+      'arguments' => array('text' => NULL, 'path' => NULL, 'options' => array()),
+    ),
+  );
+}
+
+/**
+ * Themes a facet link for a value that is currently being searched.
+ */
+function theme_facetapi_tagcloud_link_active($variables) {
+  $link_text = '';
+  if (isset($variables['text'])) {
+    if (empty($variables['options']['html'])) {
+      $link_text = check_plain($variables['text']);
+    }
+    else {
+      $link_text = $variables['text'];
+    }
+  }
+  $accessible_link_text = '<span class="element-invisible">' . t('Remove @text filter', array('@text' => $variables['text'])) . '</span>';
+  $variables['options']['html'] = TRUE;
+  $variables['text'] = '(-) ' . $link_text . $accessible_link_text;
+  return theme_link($variables);
+}

@@ -1,0 +1,473 @@
+<?php
+
+/**
+ * Matches Unicode character classes to exclude from the search index.
+ *
+ * See: http://www.unicode.org/Public/UNIDATA/UCD.html#General_Category_Values
+ *
+ * The index only contains the following character classes:
+ * Lu     Letter, Uppercase
+ * Ll     Letter, Lowercase
+ * Lt     Letter, Titlecase
+ * Lo     Letter, Other
+ * Nd     Number, Decimal Digit
+ * No     Number, Other
+ *
+ * Using the FUZZY prefix prevents a collision with core search module.
+ */
+define('FUZZY_PREG_CLASS_SEARCH_EXCLUDE',
+'\x{0}-\x{2f}\x{3a}-\x{40}\x{5b}-\x{60}\x{7b}-\x{bf}\x{d7}\x{f7}\x{2b0}-'.
+'\x{385}\x{387}\x{3f6}\x{482}-\x{489}\x{559}-\x{55f}\x{589}-\x{5c7}\x{5f3}-'.
+'\x{61f}\x{640}\x{64b}-\x{65e}\x{66a}-\x{66d}\x{670}\x{6d4}\x{6d6}-\x{6ed}'.
+'\x{6fd}\x{6fe}\x{700}-\x{70f}\x{711}\x{730}-\x{74a}\x{7a6}-\x{7b0}\x{901}-'.
+'\x{903}\x{93c}\x{93e}-\x{94d}\x{951}-\x{954}\x{962}-\x{965}\x{970}\x{981}-'.
+'\x{983}\x{9bc}\x{9be}-\x{9cd}\x{9d7}\x{9e2}\x{9e3}\x{9f2}-\x{a03}\x{a3c}-'.
+'\x{a4d}\x{a70}\x{a71}\x{a81}-\x{a83}\x{abc}\x{abe}-\x{acd}\x{ae2}\x{ae3}'.
+'\x{af1}-\x{b03}\x{b3c}\x{b3e}-\x{b57}\x{b70}\x{b82}\x{bbe}-\x{bd7}\x{bf0}-'.
+'\x{c03}\x{c3e}-\x{c56}\x{c82}\x{c83}\x{cbc}\x{cbe}-\x{cd6}\x{d02}\x{d03}'.
+'\x{d3e}-\x{d57}\x{d82}\x{d83}\x{dca}-\x{df4}\x{e31}\x{e34}-\x{e3f}\x{e46}-'.
+'\x{e4f}\x{e5a}\x{e5b}\x{eb1}\x{eb4}-\x{ebc}\x{ec6}-\x{ecd}\x{f01}-\x{f1f}'.
+'\x{f2a}-\x{f3f}\x{f71}-\x{f87}\x{f90}-\x{fd1}\x{102c}-\x{1039}\x{104a}-'.
+'\x{104f}\x{1056}-\x{1059}\x{10fb}\x{10fc}\x{135f}-\x{137c}\x{1390}-\x{1399}'.
+'\x{166d}\x{166e}\x{1680}\x{169b}\x{169c}\x{16eb}-\x{16f0}\x{1712}-\x{1714}'.
+'\x{1732}-\x{1736}\x{1752}\x{1753}\x{1772}\x{1773}\x{17b4}-\x{17db}\x{17dd}'.
+'\x{17f0}-\x{180e}\x{1843}\x{18a9}\x{1920}-\x{1945}\x{19b0}-\x{19c0}\x{19c8}'.
+'\x{19c9}\x{19de}-\x{19ff}\x{1a17}-\x{1a1f}\x{1d2c}-\x{1d61}\x{1d78}\x{1d9b}-'.
+'\x{1dc3}\x{1fbd}\x{1fbf}-\x{1fc1}\x{1fcd}-\x{1fcf}\x{1fdd}-\x{1fdf}\x{1fed}-'.
+'\x{1fef}\x{1ffd}-\x{2070}\x{2074}-\x{207e}\x{2080}-\x{2101}\x{2103}-\x{2106}'.
+'\x{2108}\x{2109}\x{2114}\x{2116}-\x{2118}\x{211e}-\x{2123}\x{2125}\x{2127}'.
+'\x{2129}\x{212e}\x{2132}\x{213a}\x{213b}\x{2140}-\x{2144}\x{214a}-\x{2b13}'.
+'\x{2ce5}-\x{2cff}\x{2d6f}\x{2e00}-\x{3005}\x{3007}-\x{303b}\x{303d}-\x{303f}'.
+'\x{3099}-\x{309e}\x{30a0}\x{30fb}\x{30fd}\x{30fe}\x{3190}-\x{319f}\x{31c0}-'.
+'\x{31cf}\x{3200}-\x{33ff}\x{4dc0}-\x{4dff}\x{a015}\x{a490}-\x{a716}\x{a802}'.
+'\x{a806}\x{a80b}\x{a823}-\x{a82b}\x{e000}-\x{f8ff}\x{fb1e}\x{fb29}\x{fd3e}'.
+'\x{fd3f}\x{fdfc}-\x{fe6b}\x{feff}-\x{ff0f}\x{ff1a}-\x{ff20}\x{ff3b}-\x{ff40}'.
+'\x{ff5b}-\x{ff65}\x{ff70}\x{ff9e}\x{ff9f}\x{ffe0}-\x{fffd}');
+
+//
+define('FUZZY_PREG_CLASS_CJK', '\x{1100}-\x{11FF}\x{3040}-\x{309F}\x{30A1}-\x{318E}' .
+  '\x{31A0}-\x{31B7}\x{31F0}-\x{31FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FCF}' .
+  '\x{A000}-\x{A48F}\x{A4D0}-\x{A4FD}\x{A960}-\x{A97F}\x{AC00}-\x{D7FF}' .
+  '\x{F900}-\x{FAFF}\x{FF21}-\x{FF3A}\x{FF41}-\x{FF5A}\x{FF66}-\x{FFDC}' .
+  '\x{20000}-\x{2FFFD}\x{30000}-\x{3FFFD}');
+
+
+/**
+ * Implements hook_theme().
+ */
+function fuzzysearch_theme() {
+  $items = array(
+    'fuzzysearch_score' => array(
+      'render element' => 'element',
+    ),
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_search_api_service_info().
+ */
+function fuzzysearch_search_api_service_info() {
+  $services['fuzzysearch_service'] = array(
+    'name' => t('Fuzzy Search'),
+    'description' => t('<p>Index items using multiple database tables, for fuzzy searches.</p>' .
+        '<ul>' . '<li>All field types are supported and indexed in a special way, with URI/String and Integer/Duration being equivalent.</li>' .
+        '<li>The "direct" parse mode results in the keys being normally split around white-space, only preprocessing might differ.</li>' .
+        '<li>Currently, phrase queries are not supported. Additionally, due to MySQL limitations, all searches will be case-insensitive.</li>' . '</ul>'),
+    'class' => 'FuzzySearchService',
+  );
+  return $services;
+}
+
+/**
+ * Implements hook_search_api_processor_info().
+ */
+function fuzzysearch_search_api_processor_info() {
+  $processors['fuzzysearch_search'] = array(
+    'name' => t('Fuzzy Search search settings'),
+    'description' => t('These settings control how Fuzzy Search indexes and searches content.'),
+    'class' => 'FuzzysearchSearch',
+    'weight' => 100,
+  );
+  $processors['fuzzysearch_excerpt'] = array(
+    'name' => t('Fuzzy Search excerpt settings'),
+    'description' => t('These settings control how Fuzzy Search displays result excerpts'),
+    'class' => 'FuzzysearchExcerpt',
+    'weight' => 101,
+  );
+
+  return $processors;
+}
+
+
+/**
+ * Insert the words into the database as they are indexed.
+ *
+ *  @param $word
+ *   Word to insert into the index.
+ *  @param $nlength
+ *   Ngram lenghth
+ *
+ *  @return
+ *   Score modifier given to the node from hook_search_score.
+ */
+function fuzzysearch_parse_word($word, $fuzzy) {
+  // Cleanse and remove spaces.
+  $ngrams = array('ngrams' => array());
+  $word = str_replace(' ', '', fuzzysearch_cleanse($word));
+  $length = drupal_strlen($word);
+  $ngrams['completeness'] = ($length - $fuzzy['nlength'] + 1) == 0 ? 100 : number_format(100 / ($length - $fuzzy['nlength'] + 1), 3);
+
+  // $comp_min is the minumum completeness an ngram can have to return words.
+  // If > 0 $extra_letters assumes the searcher has missing letters in the search term.
+  // It's configurable by the admin. Increasing the number of extra letters
+  // lowers the completeness and returns more words, making things fuzzier.
+
+  $ngrams['comp_min'] = number_format(100 / (($length - $fuzzy['nlength']) + 1 + $fuzzy['missing_letters']), 3);
+
+  // $comp_max is the maximum completeness an ngram can have and still return words.
+  // In this case we assume the search term has extra letters, and this lets us include
+  // shorter words in the results. Increasing this raises the completeness of an ngram
+  // and returns more grams with higher completeness. Completeness can never be
+  // higher than 100%.
+
+  if (($length - $fuzzy['nlength']) + 1 - $fuzzy['extra_letters'] <= 0 ) {
+    $ngrams['comp_max'] = number_format(100, 3) + .001;
+  }
+  else {
+    $ngrams['comp_max'] = number_format(100 / (($length - $fuzzy['nlength']) + 1 - $fuzzy['extra_letters']), 3) + .001;
+  }
+
+  // Split word into ngrams.
+  for ($i=0; $i < ($length - $fuzzy['nlength'] + 1); $i++) {
+    $ngrams['ngrams'][] = drupal_substr($word, $i, $fuzzy['nlength']);
+  }
+  return $ngrams;
+}
+
+/**
+ * Strip all non alphanumeric characters from a string
+ */
+function fuzzysearch_cleanse($text) {
+  $text = strip_tags($text);
+  $text = drupal_strtolower($text);
+  return preg_replace('/['. FUZZY_PREG_CLASS_SEARCH_EXCLUDE . ']+/u', ' ', $text);
+}
+
+/**
+ * Create a word id in the specified table.
+ *
+ * @param $table
+ *   The table where a string is currently being indexed.
+ */
+function fuzzysearch_get_word_id($table) {
+ $word_id = db_insert($table)
+  ->fields(array(
+    'item_id'      => 0,
+    'word_id'      => 0,
+    'ngram'        => 'xxx',
+    'completeness' => 100,
+    'score'        => 1,
+  ))
+  ->execute();
+  db_delete($table)
+    ->condition('word_id', 0)
+    ->execute();
+  return $word_id;
+}
+
+function fuzzysearch_get_index_options($index) {
+  return array(
+    'nlength' => $index->options['processors']['fuzzysearch_search']['settings']['ngram_length'],
+    'missing_letters' => $index->options['processors']['fuzzysearch_search']['settings']['missing_letters'],
+    'extra_letters' => $index->options['processors']['fuzzysearch_search']['settings']['extra_letters'],
+    'min_completeness' => $index->options['processors']['fuzzysearch_search']['settings']['completeness'],
+    'sort_score' => $index->options['processors']['fuzzysearch_search']['settings']['sort_score'],
+  );
+}
+
+function fuzzysearch_get_excerpt_options($index) {
+  return array(
+    'debug_score' => $index->options['processors']['fuzzysearch_excerpt']['settings']['debug_score'],
+    'excerpt_length' => $index->options['processors']['fuzzysearch_excerpt']['settings']['excerpt_length'],
+    'max_result_length' => $index->options['processors']['fuzzysearch_excerpt']['settings']['max_result_length'],
+    'spelling' => $index->options['processors']['fuzzysearch_excerpt']['settings']['spelling'],
+  );
+}
+
+function fuzzysearch_build_excerpt($entity, $index, $keys) {
+  // Query each matched node for the search ngrams. We use this for fuzzy
+  // highlighting of misspelled words. We do this per node to narrow
+  // the possible false ngrams when a misspelled ngram matches a real one.
+  // This could still return some false ngrams, but that's why it's fuzzy.
+  $query = fuzzysearch_static_search_query();
+  if (empty($query)) {
+    return;
+  }
+  $query->addField('t', 'ngram');
+  $query->addField('t', 'word_id');
+  $result = $query->execute();
+  $clean_grams = array();
+  while ($ngram = $result->fetchAssoc()) {
+    $clean_grams[$ngram['ngram']][] = $ngram;
+  }
+  $fuzzy = array_merge(fuzzysearch_get_index_options($index), fuzzysearch_get_excerpt_options($index));
+
+  switch ($index->item_type) {
+    case 'node':
+      node_build_content($entity);
+      // Let removed tags still delimit words.
+      $text = str_replace(array('<', '>'), array(' <', '> '), render($entity->content));
+      $text = strip_tags($text);
+      preg_replace('/\s+/', ' ', $text);
+      break;
+  }
+  return fuzzysearch_process_excerpt($clean_grams, $text, $keys, $fuzzy);
+}
+
+/**
+ * Store the unexecuted search query so we can reuse it for building the
+ * excerpt. The query is cloned when this function is called.
+ */
+function fuzzysearch_static_search_query($query = NULL) {
+  $clone = drupal_static('fuzzy_query', $query);
+  if (empty($clone)) {
+    $clone = $query;
+  }
+  return $clone;
+}
+
+
+function theme_fuzzysearch_score($variables) {
+  $output = '';
+  $output = implode($variables['element']['#separator'], $variables['element']['child']);
+  return $output;
+}
+
+
+
+function fuzzysearch_form_alter(&$form, &$form_state) {
+}
+
+
+
+function fuzzysearch_process_excerpt($ngrams, $text, $keys, $fuzzy) {
+  while (list($k, $value) = each($fuzzy)) {
+    $$k = $value;
+  }
+  global $user;
+  global $multibyte;
+  $boundary = '(?:(?<=['. FUZZY_PREG_CLASS_SEARCH_EXCLUDE . FUZZY_PREG_CLASS_CJK .'])|(?=['. FUZZY_PREG_CLASS_SEARCH_EXCLUDE . FUZZY_PREG_CLASS_CJK .']))';
+  $clean_grams = array();
+  // Ngrams can occur multiple times, so filter.
+  $clean_grams =  fuzzysearch_unique($ngrams);
+
+  // This will hold our search terms.
+  $clean_words = $keys;
+  $debug = '';
+
+  // Now we rebuild the words stripping out misspelled ngrams.
+  foreach ($clean_words as $key => $clean_word) {
+    // If we have an exact match, let's skip the work to check for misspellings.
+    if (!preg_match('/\b'. $clean_word .'\b/iu', $text)) {
+      $pos = $id_count = array();
+      $len = drupal_strlen($clean_word);
+      // Ignore search terms less than the ngram length.
+      if ($len >= $nlength) {
+        // Get the position of each good hit.
+        foreach ($clean_grams as $n => $gram) {
+          if ($multibyte == UNICODE_MULTIBYTE) {
+            if (mb_stripos($clean_word, $n) !== FALSE) {
+              $pos[mb_stripos($clean_word, $n)] = $n;
+              // Keep count of our word ids so we can try to guess which word
+              // we are trying to match.
+              foreach ($clean_grams[$n] as $ngram_data) {
+                if (!isset($id_count[$ngram_data['word_id']])) {
+                  $id_count[$ngram_data['word_id']]= '';
+                }
+                $id_count[$ngram_data['word_id']] = $id_count[$ngram_data['word_id']] + 1;
+              }
+            }
+          }
+          // No multibyte.
+          else {
+            if (stripos($clean_word, $n) !== FALSE) {
+              $pos[stripos($clean_word, $n)] = $n;
+              // Keep count of our word ids so we can try to guess which word
+              // we are trying to match.
+              foreach ($clean_grams[$n] as $ngram_data) {
+                $id_count[$ngram_data['word_id']] = '';
+                $id_count[$ngram_data['word_id']] = $id_count[$ngram_data['word_id']] + 1;
+              }
+            }
+          }
+        }
+        ksort($pos);
+
+        // This gives us an array with the most common word_id as the first
+        // element.
+        arsort($id_count);
+        $id_count = array_keys($id_count);
+
+        // Remove any position matches that are not in our likely word (the
+        // word with the highest word_id count).
+        foreach ($pos as $position => $pgram) {
+          $pmatch = FALSE;
+          foreach ($clean_grams[$pgram] as $pid) {
+            if ($pid['word_id'] == $id_count[0]) {
+              $pmatch = TRUE;
+            }
+          }
+          if (!$pmatch) {
+            unset($pos[$position]);
+          }
+        }
+
+        // Start with a dummy word at the right length, but only if there are
+        // some matching ngram hits.
+        $newword = '';
+        if (count($pos)) {
+          $newword = str_pad('', $len, '.');
+        }
+        $hits = $misses = $i = $pos_plus = 0;
+
+        // Check character by character for ngram matches. We don't need to check
+        // beyond the first character of the ngram.
+        for ($i = 0; $i <= $len - $nlength; $i++) {
+          // This is a match, so insert it into our dummy word.
+          if (isset($pos[$i])) {
+
+            $newword =  drupal_substr($newword, 0, $i + $pos_plus) . $pos[$i] . drupal_substr($newword, $i + $pos_plus + $nlength, $len);
+            ++$hits;
+          }
+
+          // This is a miss, so replace with a wildcard.
+          else {
+            // But don't overwrite a letter, only a '.' .
+            if (drupal_substr($newword, $i + $pos_plus + $nlength - 1, 1) == '.') {
+              $newword = ($i == 0 || $i + $pos_plus > $len - $nlength) ? $newword : drupal_substr($newword, 0, $i + $pos_plus + $nlength - 1) . '.*' . drupal_substr($newword, $i + $pos_plus + 1  + $nlength - 1);
+              // If we insert here, we need to adjust the positions in the $pos array.
+              $pos_plus++;
+              $len++;
+            }
+            ++$misses;
+          }
+        }
+        // Only keep our rebuilt word if it meets our minimum spelling match score.
+        // Subtract $pos_plus from $len to get the original search term length.
+        // Then subtract $nlength - 1 to get the number of ngrams in the term.
+        $spell_percent = $hits/($len - $pos_plus - $nlength + 1) * 100;
+        if ($spell_percent >= $spelling) {
+          // Remove consecutive wildcards and add word boundaries.
+          $newword = preg_replace("/\.\./", ".*", $newword);
+          $newword = preg_replace("/\.\*\.\*/", ".*", $newword);
+          $newword = '\b\w*'. trim($newword, '.*') .'.*?\b';
+          $clean_words[$key] = $newword;
+
+        }
+        else {
+          unset($clean_words[$key]);
+        }
+      }
+      // The word is under the ngram length, so unset the word.
+      else {
+        unset($clean_words[$key]);
+      }
+      if ($debug_score) {
+        $debug .= '<p><strong>' . t('Highlighting regex @newword -- Ngram spelling match is @percent%', array('@newword' => $newword, '@percent' => number_format($spell_percent, 2))) . '</strong></p>';
+      }
+    }
+  }
+
+  // Build a replacement node body containing sections of text with the found
+  // words, with leading and trailing text.
+  $section = array();
+  $section_length = array();
+  foreach ($clean_words as $k => $word) {
+    $location = 0;
+    // If the word is found, add its position to $section.
+    while (preg_match('/'. $word .'/iu', $text, $matches, PREG_OFFSET_CAPTURE, $location) && $word != '') {
+      // Make sure we didn't traverse any word breaks by checking for spaces.
+      // Pretty sure we don't need mb_stripos() here because we don't actually
+      // care about the position
+      if (!stripos($matches[0][0], ' ')) {
+        $section[] = _fuzzysearch_char_count($text, $matches[0][1]);
+        $section_length[$matches[0][1]] = drupal_strlen($word);
+        $clean_words[$k] = $matches[0][0];
+      }
+      // Increase $location by one so we don't find the previous location.
+      $location =  $matches[0][1] + 1;
+    }
+  }
+  // If there are no matches, the our word has a lot of common ngrams, but not
+  // in the right places. Return.
+  if (empty($section)) {
+    return;
+  }
+
+  // Because we found words one by one, the locations are out of order. Sort
+  // so that the locations are in natural order.
+  asort($section);
+  ksort($section_length);
+  $section = array_values($section);
+  $section_length = array_values($section_length);
+  $p = 0;
+  $found = $newbody = '';
+  $trail = $lead = $excerpt_length / 2;
+  $start = $section[0];
+  while (isset($section[$p])) {
+    // If the current section is within the previous, let's not create a new one
+    // so we don't have any duplicate text.
+    if (isset($section[$p + 1]) && $section[$p] + $lead + $section_length[$p] + $trail > $section[$p + 1]) {
+      $trail = $section[$p+1] + $section_length[$p+1] + $lead - $start;
+      $p++;
+      continue;
+    }
+    // Put an excerpt into our replacement node body, with the
+    // found word in the center.
+    $found = $start - $lead < 0 ? drupal_substr($text, 0, $excerpt_length) : drupal_substr($text, $start - $lead, $trail + $lead);
+    if ($max_result_length && (drupal_strlen($newbody . $found) > $max_result_length)) {
+      break;
+    }
+    $newbody .= '...'. $found .'... ';
+    $p++;
+    $start = isset($section[$p]) ? $section[$p] : 0;
+    $trail = $lead;
+  }
+  // Wrap the found words in a <strong> tag to highlight them.
+  $newbody = preg_replace('/' . $boundary . '[^' . FUZZY_PREG_CLASS_SEARCH_EXCLUDE . FUZZY_PREG_CLASS_CJK . ']*' . '(' . implode('|', $clean_words) . ')' . '[^' . FUZZY_PREG_CLASS_SEARCH_EXCLUDE . FUZZY_PREG_CLASS_CJK . ']*' . $boundary . '/iu', '<strong>\0</strong>', $newbody);
+  return $newbody . $debug;
+}
+
+
+/**
+ * Recursive array_unique().
+ */
+function fuzzysearch_unique($array) {
+  $result = array_map("unserialize", array_unique(array_map("serialize", $array)));
+
+  foreach ($result as $key => $value) {
+    if ( is_array($value) ) {
+      $result[$key] = fuzzysearch_unique($value);
+    }
+  }
+  return $result;
+}
+
+// Using some code from drupal_substr() to set character count of the found
+// clean word.
+function _fuzzysearch_char_count($text, $position) {
+  $bytes = 0;
+  // Count all the continuation bytes from the start until we have found
+  // $start characters
+  $bytes = -1;
+  $chars = -1;
+  while ($bytes < $position) {
+    $bytes++;
+    $c = ord($text[$bytes]);
+    if ($c < 0x80 || $c >= 0xC0) {
+      $chars++;
+    }
+  }
+  return $chars;
+}

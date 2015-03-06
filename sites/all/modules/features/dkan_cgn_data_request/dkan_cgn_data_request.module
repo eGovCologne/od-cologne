@@ -1,0 +1,127 @@
+<?php
+/**
+ * @file
+ * Code for the Dkan CGN Data Request feature.
+ */
+
+include_once 'dkan_cgn_data_request.features.inc';
+
+
+/**
+ * Implements hook_admin_paths_alter().
+ */
+function dkan_cgn_data_request_admin_paths_alter(&$paths) {
+  $paths['node/*/edit'] = FALSE;
+  $paths['node/add'] = FALSE;
+  $paths['node/add/request-data'] = TRUE;
+}
+
+
+function dkan_cgn_data_request_node_presave($node) {
+
+
+  if ($node->type == 'request_data') {
+    if ($node->field_request_data_public['und'][0]['value'] == 1 && !user_is_logged_in()) {
+
+      $node->status = 1;
+    }
+
+  }
+
+}
+
+/**
+ * Implements hook_block_info().
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @return mixed
+ */
+function dkan_cgn_data_request_block_info() {
+  $blocks['dkan_cgn_data_request_info'] = array(
+    'info' => t('Daten fordern'),
+    'status' => TRUE,
+    'region' => 'sidebar_first',
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'daten/anfragen'
+  );
+  $blocks['dkan_cgn_data_request_legend'] = array(
+    'info' => t('Daten Status'),
+    'status' => TRUE,
+    'region' => 'sidebar_first',
+    'visibility' => BLOCK_VISIBILITY_LISTED,
+    'pages' => 'daten/anfragen'
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_view().
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @param string $delta
+ * @return mixed
+ */
+function dkan_cgn_data_request_block_view($delta = '') {
+  switch ($delta) {
+    case 'dkan_cgn_data_request_info':
+
+      $blocks['subject'] = "Daten Anfragen";
+      $blocks['content'] = dkan_cgn_data_request_data_info();
+
+      return $blocks;
+
+    case 'dkan_cgn_data_request_legend':
+
+      $blocks['subject'] = "Status Legende";
+      $blocks['content'] = dkan_cgn_data_request_data_legend();
+
+      return $blocks;
+      break;
+  }
+}
+
+/**
+ * Build the content for this block.
+ *
+ * We have to loop on every question.
+ *
+ * @todo add an admininterface to change the number of questions
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @return string
+ */
+function dkan_cgn_data_request_data_info() {
+  $output = 'Sie haben Ideen für Datensätze, die noch nicht im Portal zu finden sind?
+ Informieren Sie uns, wir bemühen uns die Daten schnellstesn bereit zu stellen.
+<br /><br /><br />
+<a href="#overlay=node/add/request-data"><button class="btn btn-primary">Datenanfrage stellen</button></a>';
+
+  return $output;
+}
+
+function dkan_cgn_data_request_data_legend() {
+  $output = 'Sie haben Ideen für Datensätze, die noch nicht im Portal zu finden sind?
+ Informieren Sie uns, wir bemühen uns die Daten schnellstesn bereit zu stellen.
+<br /><br /><br />
+<a href="#overlay=node/add/request-data"><button class="btn btn-primary">Datenanfrage stellen</button></a>';
+
+  return $output;
+}
+
+
+/**
+ * Redirect to startpoint
+ * @param $form
+ * @param $form_state
+ * @param $form_id
+ */
+function dkan_cgn_data_request_form_alter(&$form, &$form_state, $form_id) {
+
+  if ($form_id == 'request_data_node_form') {
+    $form['actions']['submit']['#submit'][] = 'custom_node_submit';
+  }
+}
+
+
+function custom_node_submit($form, &$form_state) {
+  $form_state['redirect'] = '/daten/anfragen';
+}

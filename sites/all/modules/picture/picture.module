@@ -1,0 +1,725 @@
+<?php
+
+define('PICTURE_CLASS', 'picture');
+define('PICTURE_SEPARATOR', '__');
+
+/**
+ * Implements hook_permission().
+ */
+function picture_permission() {
+  return array(
+    'administer pictures' => array(
+      'title' => t('Administer Pictures'),
+      'description' => t('Administer Pictures'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function picture_menu() {
+  $items = array();
+
+  $items['admin/config/media/picture'] = array(
+    'title' => 'Picture',
+    'description' => 'Manage Pictures',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('picture_admin_breakpoints'),
+    'access arguments' => array('administer pictures'),
+    'file' => 'picture.admin.inc',
+  );
+
+  $items['admin/config/media/picture/groups'] = array(
+    'title' => 'Groups',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 10,
+  );
+
+  $items['admin/config/media/picture/groups/global'] = array(
+    'title' => 'Map breakpoints and image styles',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -1,
+  );
+
+  $items['admin/config/media/picture/groups/import'] = array(
+    'title' => 'Import mappings',
+    'page arguments' => array('picture_admin_import_form'),
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('administer responsive images and styles'),
+    'file' => 'picture.admin.inc',
+    'weight' => 999,
+  );
+
+  $breakpoint_groups = breakpoints_breakpoint_group_load_all();
+  foreach ($breakpoint_groups as $breakpoint_group_name => $breakpoint_group) {
+    if (!empty($breakpoint_group->machine_name)) {
+      $items['admin/config/media/picture/groups/' . $breakpoint_group->machine_name] = array(
+        'title' => $breakpoint_group->name,
+        'page arguments' => array('picture_admin_breakpoints', $breakpoint_group->machine_name),
+        'type' => MENU_LOCAL_TASK,
+        'access arguments' => array('administer pictures'),
+        'file' => 'picture.admin.inc',
+        'weight' => 15,
+      );
+      $items['admin/config/media/picture/groups/' . $breakpoint_group->machine_name . '/export'] = array(
+        'title' => 'Export ' . check_plain($breakpoint_group->name) . ' mappings',
+        'page callback' => 'drupal_get_form',
+        'page arguments' => array('picture_admin_export_form', 'mappings.' . $breakpoint_group->machine_name),
+        'type' => MENU_LOCAL_ACTION,
+        'access arguments' => array('administer responsive images and styles', 'mappings.' . $breakpoint_group->machine_name),
+        'access callback' => 'picture_mappings_export_access',
+        'file' => 'picture.admin.inc',
+        'weight' => 15,
+      );
+    }
+  }
+
+  return $items;
+}
+
+/**
+ * Access callback.
+ */
+function picture_mappings_export_access($perm, $mapping_name) {
+  return picture_mapping_load($mapping_name) && user_access($perm);
+}
+
+/**
+ * Load mappings.
+ */
+function picture_mapping_load($name = NULL) {
+  ctools_include('export');
+  if ($name) {
+    $mappings = ctools_export_load_object('picture_mapping', 'names', array($name));
+    $mapping = isset($mappings[$name]) ? $mappings[$name] : FALSE;
+    return $mapping;
+  }
+  return ctools_export_load_object('picture_mapping');
+}
+
+/**
+ * Load all mappings.
+ */
+function picture_mapping_load_all() {
+  ctools_include('export');
+  return ctools_export_load_object('picture_mapping');
+}
+
+/**
+ * Save mappings.
+ */
+function picture_mapping_save(&$mapping) {
+  ctools_include('export');
+  $update = isset($mapping->id) ? array('id') : array();
+  return drupal_write_record('picture_mapping', $mapping, $update);
+}
+
+/**
+ * Implements hook_library().
+ */
+function picture_library() {
+  $libraries['matchmedia'] = array(
+    'title' => t('Matchmedia'),
+    'website' => 'https://github.com/attiks/picturefill-proposal',
+    'version' => '0.1',
+    'js' => array(
+      drupal_get_path('module', 'picture') . '/picturefill/matchmedia.js' => array('type' => 'file', 'weight' => -10, 'group' => JS_DEFAULT),
+    ),
+  );
+  $libraries['picturefill'] = array(
+    'title' => t('Picturefill'),
+    'website' => 'https://github.com/attiks/picturefill-proposal',
+    'version' => '0.1',
+    'js' => array(
+      drupal_get_path('module', 'picture') . '/picturefill/picturefill.js' => array('type' => 'file', 'weight' => -10, 'group' => JS_DEFAULT),
+    ),
+  );
+  $libraries['picture.ajax'] = array(
+    'title' => t('Ajax support for picture'),
+    'version' => VERSION,
+    'js' => array(
+      drupal_get_path('module', 'picture') . '/picture.js' => array('type' => 'file', 'weight' => -10, 'group' => JS_DEFAULT),
+    ),
+  );
+  return $libraries;
+}
+
+/**
+ * Empty picture object.
+ */
+function picture_empty_object() {
+  return (object)picture_empty_array();
+}
+
+/**
+ * Empty picture array.
+ */
+function picture_empty_array() {
+  return array(
+    'machine_name' => '',
+    'breakpoint_group' => '',
+    'mapping' => array(),
+  );
+}
+
+/**
+ * Implements hook_ctools_plugin_api().
+ *
+ * Lets CTools know which plugin APIs are implemented by picture module.
+ */
+function picture_ctools_plugin_api($owner, $api) {
+  static $api_versions = array(
+    'file_entity' => array(
+      'file_default_displays' => 1,
+    ),
+  );
+  if (isset($api_versions[$owner][$api])) {
+    return array('version' => $api_versions[$owner][$api]);
+  }
+}
+
+/**
+ * Validate mappings.
+ */
+function picture_mapping_validate($mapping) {
+  if (!is_object($mapping)) {
+    return FALSE;
+  }
+  foreach (array('machine_name', 'breakpoint_group', 'mapping') as $property) {
+    if (!property_exists($mapping, $property)) {
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function picture_theme() {
+  return array(
+    'picture' => array(
+      'variables' => array(
+        'style_name' => NULL,
+        'path' => NULL,
+        'width' => NULL,
+        'height' => NULL,
+        'alt' => '',
+        'title' => NULL,
+        'attributes' => array(),
+        'breakpoints' => array(),
+      ),
+    ),
+    'picture_formatter' => array(
+      'variables' => array(
+        'item' => NULL,
+        'path' => NULL,
+        'image_style' => NULL,
+        'breakpoints' => array(),
+      ),
+    ),
+    'picture_source' => array(
+      'variables' => array(
+        'src' => NULL,
+        'dimension' => NULL,
+        'media' => NULL,
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function picture_field_formatter_info() {
+  $formatters = array(
+    'picture' => array(
+      'label' => t('Picture'),
+      'field types' => array('image'),
+      'settings' => array('picture_group' => '', 'fallback_image_style' => '', 'image_link' => ''),
+    ),
+  );
+
+  return $formatters;
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ */
+function picture_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $element['picture_group'] = array(
+    '#title' => t('Picture group'),
+    '#type' => 'select',
+    '#default_value' => $settings['picture_group'],
+    '#required' => TRUE,
+    '#options' => picture_get_mapping_options(),
+  );
+
+  $image_styles = image_style_options(FALSE);
+  $element['fallback_image_style'] = array(
+    '#title' => t('Fallback image style'),
+    '#type' => 'select',
+    '#default_value' => $settings['fallback_image_style'],
+    '#empty_option' => t('Automatic'),
+    '#options' => $image_styles,
+  );
+
+  $link_types = array(
+    'content' => t('Content'),
+    'file' => t('File'),
+  );
+  $element['image_link'] = array(
+    '#title' => t('Link image to'),
+    '#type' => 'select',
+    '#default_value' => $settings['image_link'],
+    '#empty_option' => t('Nothing'),
+    '#options' => $link_types,
+  );
+
+  return $element;
+}
+
+function picture_get_mapping_options() {
+  $picture_mapping_options = array();
+  $picture_mappings = picture_mapping_load_all();
+  if ($picture_mappings && !empty($picture_mappings)) {
+    foreach ($picture_mappings as $machine_name => $picture_mapping) {
+      $breakpoint_group = breakpoints_breakpoint_group_load($picture_mapping->breakpoint_group);
+      if ($breakpoint_group) {
+        $picture_mapping_options[$machine_name] = $breakpoint_group->name;
+      }
+    }
+  }
+  return $picture_mapping_options;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function picture_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+
+  $summary = array();
+
+  $picture_mapping = picture_mapping_load($settings['picture_group']);
+  $breakpoint_group = breakpoints_breakpoint_group_load($picture_mapping->breakpoint_group);
+  if ($breakpoint_group) {
+    $summary[] = t('Picture group: @picture_group', array('@picture_group' => $breakpoint_group->name));
+  }
+  else {
+    $summary[] = t("Picture group doesn't exists");
+  }
+
+  $image_styles = image_style_options(FALSE);
+  unset($image_styles['']);
+  if (isset($image_styles[$settings['fallback_image_style']])) {
+    $summary[] = t('Fallback Image style: @style', array('@style' => $image_styles[$settings['fallback_image_style']]));
+  }
+  else {
+    $summary[] = t('Automatic fallback');
+  }
+
+  $link_types = array(
+    'content' => t('Linked to content'),
+    'file' => t('Linked to file'),
+  );
+  // Display this setting only if image is linked.
+  if (isset($link_types[$settings['image_link']])) {
+    $summary[] = $link_types[$settings['image_link']];
+  }
+
+  return implode('<br />', $summary);
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function picture_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  // Check if the formatter involves a link.
+  if ($display['settings']['image_link'] == 'content') {
+    $uri = entity_uri($entity_type, $entity);
+  }
+  elseif ($display['settings']['image_link'] == 'file') {
+    $link_file = TRUE;
+  }
+
+  $breakpoint_styles = array();
+  $fallback_image_style = '';
+  $group_name = $display['settings']['picture_group'];
+  $mappings = picture_mapping_load($group_name);
+  if ($mappings) {
+    foreach ($mappings->mapping as $breakpoint_name => $multipliers) {
+      if (!empty($multipliers)) {
+        foreach ($multipliers as $multiplier => $image_style) {
+          if (!empty($image_style)) {
+            if (empty($fallback_image_style)) {
+              $fallback_image_style = $image_style;
+            }
+            if (!isset($breakpoint_styles[$breakpoint_name])) {
+              $breakpoint_styles[$breakpoint_name] = array();
+            }
+            $breakpoint_styles[$breakpoint_name][$multiplier] = $image_style;
+          }
+        }
+      }
+    }
+  }
+
+  if (isset($display['settings']['fallback_image_style']) && !empty($display['settings']['fallback_image_style'])) {
+    $fallback_image_style = $display['settings']['fallback_image_style'];
+  }
+
+  foreach ($items as $delta => $item) {
+    if (isset($link_file)) {
+      $uri = array(
+        'path' => file_create_url($item['uri']),
+        'options' => array(),
+      );
+    }
+    $element[$delta] = array(
+      '#theme' => 'picture_formatter',
+      '#attached' => array('library' => array(
+        array('picture', 'matchmedia'),
+        array('picture', 'picturefill'),
+        array('picture', 'picture.ajax'),
+      )),
+      '#item' => $item,
+      '#image_style' => $fallback_image_style,
+      '#breakpoints' => $breakpoint_styles,
+      '#path' => isset($uri) ? $uri : '',
+    );
+  }
+
+  return $element;
+}
+
+function theme_picture_formatter($variables) {
+  if (!isset($variables['breakpoints']) || empty($variables['breakpoints'])) {
+    return theme('image_formatter', $variables);
+  }
+
+  $item = $variables['item'];
+
+  // Do not output an empty 'title' attribute.
+  if (isset($item['title']) && drupal_strlen($item['title']) == 0) {
+    unset($item['title']);
+  }
+
+  $item['style_name'] = $variables['image_style'];
+  $item['breakpoints'] = $variables['breakpoints'];
+
+  if (!isset($item['path']) && isset($variables['uri'])) {
+    $item['path'] = $variables['uri'];
+  }
+  $output = theme('picture', $item);
+
+  if (isset($variables['path']['path'])) {
+    $path = $variables['path']['path'];
+    $options = isset($variables['path']['options']) ? $variables['path']['options'] : array();
+    $options['html'] = TRUE;
+    $output = l($output, $path, $options);
+  }
+  return $output;
+}
+
+/**
+ * Returns HTML for a picture.
+ *
+ * @param $variables
+ *   An associative array containing:
+ *   - uri: Either the path of the image file (relative to base_path()) or a
+ *     full URL.
+ *   - width: The width of the image (if known).
+ *   - height: The height of the image (if known).
+ *   - alt: The alternative text for text-based browsers.
+ *   - breakpoints: An array containing breakpoints.
+ *
+ * @ingroup themeable
+ */
+function theme_picture($variables) {
+  // Make sure that width and height are proper values
+  // If they exists we'll output them
+  // @see http://www.w3.org/community/respimg/2012/06/18/florians-compromise/
+  if (isset($variables['width']) && empty($variables['width'])) {
+    unset($variables['width']);
+    unset($variables['height']);
+  }
+  elseif (isset($variables['height']) && empty($variables['height'])) {
+    unset($variables['width']);
+    unset($variables['height']);
+  }
+
+  $sources = array();
+  $output = array();
+
+  // Fallback image, output as source with media query.
+  $sources[] = array(
+    'src' => image_style_url($variables['style_name'], $variables['uri']),
+    'dimensions' => picture_get_image_dimensions($variables),
+  );
+
+  // All breakpoints and multipliers.
+  foreach ($variables['breakpoints'] as $breakpoint_name => $multipliers) {
+    $breakpoint = breakpoints_breakpoint_load_by_fullkey($breakpoint_name);
+    if ($breakpoint) {
+      $new_sources = array();
+      foreach ($multipliers as $multiplier => $image_style) {
+        $new_source = $variables;
+        $new_source['style_name'] = $image_style;
+        $new_source['#media_query'] = picture_get_multiplier_media_query($multiplier, $breakpoint->breakpoint);
+        $new_sources[] = $new_source;
+      }
+
+      foreach ($new_sources as $new_source) {
+        $sources[] = array(
+          'src' => image_style_url($new_source['style_name'], $new_source['uri']),
+          'dimensions' => picture_get_image_dimensions($new_sources[0]),
+          'media' => $new_source['#media_query'],
+        );
+      }
+    }
+  }
+
+  if (!empty($sources)) {
+    $attributes = array();
+    foreach (array('alt', 'title') as $key) {
+      if (isset($variables[$key])) {
+        $attributes['data-' . $key] = $variables[$key];
+      }
+    }
+    $output[] = '<span data-picture' . drupal_attributes($attributes) . '>';
+
+    // Add source tags to the output.
+    foreach ($sources as $source) {
+      $output[] = theme('picture_source', $source);
+    }
+
+    // Output the fallback image.
+    if (empty($variables['path'])) {
+      $variables['path'] = $variables['uri'];
+    }
+
+    $output[] = '<noscript>' . theme('image_style', $variables) . '</noscript>';
+    $output[] = '</span>';
+    return implode("\n", $output);
+  }
+}
+
+/**
+ * Generates the media query for multipliers of an image
+ *
+ * @param $multiplier
+ *   A string containing the multiplier for which the media query is for.
+ *
+ * @param $breakpoint
+ *   A string containing the breakpoint media query.
+ *
+ * @return sting
+ *   The sting containing the media query for the multiplier.
+ */
+function picture_get_multiplier_media_query($multiplier, $breakpoint) {
+  $media_query = $breakpoint;
+  if($multiplier != '1x') {
+    $multiplier_formatted = str_replace('x', '', $multiplier);
+    $media_query = $breakpoint . ' and (min-device-pixel-ratio: ' . $multiplier_formatted . '), ';
+    $media_query .= $breakpoint . ' and (-o-min-device-pixel-ratio: ' . $multiplier_formatted . '), ';
+    $media_query .= $breakpoint . ' and (-webkit-min-device-pixel-ratio: ' . $multiplier_formatted . '), ';
+    $media_query .= $breakpoint . ' and (min-resolution: ' . $multiplier_formatted . 'dppx)';
+  }
+  return $media_query;
+}
+
+/**
+ * Returns HTML for a source tag.
+ *
+ * @param type $variables
+ *   An associative array containing:
+ *   - media: The media query to use.
+ *   - src: Either the path of the image file (relative to base_path()) or a
+ *     full URL.
+ *   - dimensions: The width and height of the image (if known).
+ *
+ * @ingroup themeable
+ */
+function theme_picture_source($variables) {
+  $output = array();
+  if (isset($variables['media']) && !empty($variables['media'])) {
+    $output[] = '<span data-media="' . $variables['media'] . '" data-src="' . $variables['src'] . '" ' . drupal_attributes($variables['dimensions']) . '></span>';
+  }
+  else {
+    $output[] = '<span data-src="' . $variables['src'] . '" ' . drupal_attributes($variables['dimensions']) . '></span>';
+  }
+  return implode("\n", $output);
+}
+
+/**
+ * Determines the dimensions of an image.
+ *
+ * @param $variables
+ *   An associative array containing:
+ *   - style_name: The name of the style to be used to alter the original image.
+ *   - width: The width of the source image (if known).
+ *   - height: The height of the source image (if known).
+ *
+ * @return array
+ *   Dimensions to be modified - an array with components width and height, in
+ *   pixels.
+ */
+function picture_get_image_dimensions($variables) {
+  // Determine the dimensions of the styled image.
+  $dimensions = array(
+    'width' => $variables['width'],
+    'height' => $variables['height'],
+  );
+
+  image_style_transform_dimensions($variables['style_name'], $dimensions);
+
+  return $dimensions;
+}
+
+/**
+ * Implements hook_file_formatter_info().
+ */
+function picture_file_formatter_info() {
+  $formatters['file_picture'] = array(
+    'label' => t('Picture'),
+    'default settings' => array(
+      'picture_group' => '',
+      'fallback_image_style' => '',
+      'alt' => '',
+      'title' => '',
+    ),
+    'view callback' => 'picture_file_formatter_picture_view',
+    'settings callback' => 'picture_file_formatter_picture_settings',
+  );
+
+  return $formatters;
+}
+
+/**
+ * 'view callback' for hook_file_formatter_info().
+ */
+function picture_file_formatter_picture_view($file, $display, $langcode) {
+  // Prevent PHP notices when trying to read empty files.
+  // @see http://drupal.org/node/681042
+  if (!$file->filesize) {
+    return;
+  }
+
+  // Do not bother proceeding if this file does not have an image mime type.
+  if (strpos($file->filemime, 'image/') !== 0) {
+    return;
+  }
+
+  if (file_entity_file_is_readable($file) && isset($file->image_dimensions)) {
+    $breakpoint_styles = array();
+    $fallback_image_style = '';
+    $group_name = $display['settings']['picture_group'];
+    $mappings = picture_mapping_load($group_name);
+    if ($mappings) {
+      foreach ($mappings->mapping as $breakpoint_name => $multipliers) {
+        if (!empty($multipliers)) {
+          foreach ($multipliers as $multiplier => $image_style) {
+            if (!empty($image_style)) {
+              if (empty($fallback_image_style)) {
+                $fallback_image_style = $image_style;
+              }
+              if (!isset($breakpoint_styles[$breakpoint_name])) {
+                $breakpoint_styles[$breakpoint_name] = array();
+              }
+              $breakpoint_styles[$breakpoint_name][$multiplier] = $image_style;
+            }
+          }
+        }
+      }
+    }
+
+    if (isset($display['settings']['fallback_image_style']) && !empty($display['settings']['fallback_image_style'])) {
+      $fallback_image_style = $display['settings']['fallback_image_style'];
+    }
+
+    $replace_options = array(
+      'clear' => 1,
+      'sanitize' => 0,
+    );
+    $element = array(
+      '#theme' => 'picture_formatter',
+      '#attached' => array('library' => array(
+        array('picture', 'matchmedia'),
+        array('picture', 'picturefill'),
+        array('picture', 'picture.ajax'),
+      )),
+      '#item' => array(
+        'style_name' => $display['settings']['image_style'],
+        'path' => $file->uri,
+        'uri' => $file->uri,
+        'width' => $file->image_dimensions['width'],
+        'height' => $file->image_dimensions['height'],
+        'alt' => token_replace($display['settings']['alt'], array('file' => $file), $replace_options),
+        'title' => token_replace($display['settings']['title'], array('file' => $file), $replace_options),
+      ),
+      '#image_style' => $fallback_image_style,
+      '#breakpoints' => $breakpoint_styles,
+      '#path' => '',
+    );
+
+    return $element;
+  }
+}
+
+/**
+ * 'settings callback' for hook_file_formatter_info().
+ */
+function picture_file_formatter_picture_settings($form, &$form_state, $settings) {
+  $picture_group_options = array();
+  $picture_mappings = picture_mapping_load_all();
+  if ($picture_mappings && !empty($picture_mappings)) {
+    foreach ($picture_mappings as $machine_name => $picture_mapping) {
+      $breakpoint_group = breakpoints_breakpoint_group_load($picture_mapping->breakpoint_group);
+      if ($breakpoint_group) {
+        $picture_group_options[$machine_name] = $breakpoint_group->name;
+      }
+    }
+  }
+
+  $element['picture_group'] = array(
+    '#title' => t('Picture group'),
+    '#type' => 'select',
+    '#default_value' => $settings['picture_group'],
+    '#required' => TRUE,
+    '#options' => $picture_group_options,
+  );
+
+  $image_styles = image_style_options(FALSE);
+  $element['fallback_image_style'] = array(
+    '#title' => t('Fallback image style'),
+    '#type' => 'select',
+    '#default_value' => $settings['fallback_image_style'],
+    '#empty_option' => t('Automatic'),
+    '#options' => $image_styles,
+  );
+
+  $element['alt'] = array(
+    '#title' => t('Alt attribute'),
+    '#description' => t('The text to use as value for the <em>img</em> tag <em>alt</em> attribute.'),
+    '#type' => 'textfield',
+    '#default_value' => $settings['alt'],
+  );
+
+  // Allow the setting of the title attribute.
+  $element['title'] = array(
+    '#title' => t('Title attribute'),
+    '#description' => t('The text to use as value for the <em>img</em> tag <em>title</em> attribute.'),
+    '#type' => 'textfield',
+    '#default_value' => $settings['title'],
+  );
+
+  return $element;
+}

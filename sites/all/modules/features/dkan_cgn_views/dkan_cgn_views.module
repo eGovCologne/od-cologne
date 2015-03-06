@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Dkan CGN Views feature.
+ */
+
+include_once 'dkan_cgn_views.features.inc';

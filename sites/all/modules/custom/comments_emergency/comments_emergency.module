@@ -1,0 +1,189 @@
+<?php
+
+/**
+ * @file
+ * This module provides the admin-settings
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ */
+
+/**
+ * Implements hook_permission()
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @return array
+ */
+function comments_emergency_permission() {
+  return array(
+    'emergency comments' => array(
+      'title' => t('Use Emergency Comments'),
+      'description' => t('Set Bulk comments off'),
+    ),
+  );
+}
+
+
+/**
+ * Implements hook_menu()
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @return mixed
+ */
+function comments_emergency_menu() {
+
+  $items['admin/comments_emergency'] = array(
+    'title' => 'Comments Emergency',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('comments_emergency_form'),
+    'access callback' => 'user_access',
+    'access arguments' => array('emergency comments'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_form()
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @param $form
+ * @param $form_state
+ * @return mixed
+ */
+function comments_emergency_form($form, &$form_state) {
+
+  $form['description'] = array(
+    '#type' => 'item',
+    '#title' => t('Enable and disable Comments of this Platform'),
+  );
+
+  $form['open'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Open comments by content type'),
+  );
+
+  $form['open']['status'] = array(
+    '#type' => 'radios',
+    '#title' => t('Switch'),
+    '#options' => array(
+      '1' => t('Close'),
+      '2' => t('Open')
+    ),
+    '#required' => FALSE,
+    '#default_value' => variable_get('comments_emergency_closed'),
+  );
+
+  $form['open']['types'] = array(
+    '#type' => 'select',
+    '#title' => t('Content type'),
+    '#options' => comments_emergency_get_node_types(),
+    '#required' => FALSE,
+    '#default_value' => variable_get('comments_emergency_closed'),
+  );
+
+  // This entire form element will be replaced whenever 'changethis' is updated.
+  $form['replace_textfield'] = array(
+    '#type' => 'fieldset',
+    '#title' => t("The comments of the following nodes are affected by this tool"),
+    // The prefix/suffix provide the div that we're replacing, named by
+    // #ajax['wrapper'] above.
+    '#prefix' => '<div id="replace_textfield_div">',
+    '#suffix' => '</div>',
+    '#description' => "Node ID's: ",
+  );
+
+  $form['preview'] = array(
+    '#type' => 'button',
+    '#value' => t('Switch'),
+    '#weight' => 19,
+    '#ajax' => array(
+      // #ajax has two required keys: callback and wrapper.
+      // 'callback' is a function that will be called when this element changes.
+      'callback' => 'comments_emergency_callback',
+      // 'wrapper' is the HTML id of the page element that will be replaced.
+      'wrapper' => 'replace_textfield_div',
+      // There are also several optional keys - see ajax_example_autocheckboxes
+      // below for details on 'method', 'effect' and 'speed' and
+      // ajax_example_dependent_dropdown for 'event'.
+    ),
+  );
+
+
+  if (isset($form_state['values'])) {
+    if ($form_state['values']['op'] == "Switch") {
+
+       $plain = comments_emergency_flip($form_state['values']['status'],  $form_state['values']['types']);
+
+      $status = t('open');
+      if($form_state['values']['status'] == 1){
+        $status = t('closed');
+      }
+      $form['replace_textfield']['#description'] = "<p>Node ID's: " . $plain . '</p><p> Comments '.$status.' Type: '. $form_state['values']['types'].'</p>';
+    }
+  }
+
+
+  return $form;
+}
+
+
+/**
+ * Implements hook_callback()
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @param $form
+ * @param $form_state
+ * @return mixed
+ */
+function comments_emergency_callback($form, &$form_state) {
+  return $form['replace_textfield'];
+}
+
+
+/**
+ * Flip the comment status
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @param $status
+ * @param $type
+ * @return string
+ */
+function comments_emergency_flip($status,  $type) {
+  /**
+   * Get the nid's of contenttype
+   */
+  $type_nids = array();
+  $result = db_select('node', 'n')->fields('n')->condition('type', $type)->execute();
+  while ($record = $result->fetchAssoc()) {
+    array_push($type_nids, $record['nid']);
+
+  }
+  $plain = implode(', ', $type_nids);
+
+ $node_revision_updated = db_update('node_revision')
+   ->fields(array('comment' => $status,))
+   ->condition('nid', $type_nids, "IN")
+   ->execute();
+
+ $node_updated = db_update('node')
+   ->fields(array( 'comment' => $status,))
+   ->condition("nid", $type_nids  , "IN")
+   ->execute();
+
+  return $plain;
+}
+
+
+/**
+ * Implements hook_get_node_types()
+ *
+ * @author Bruno Waßerer - b.wasserer@wasserer.biz
+ * @return array
+ */
+function comments_emergency_get_node_types() {
+  $node_type = array_keys(node_type_get_types());
+  $types = array_combine($node_type, $node_type);
+  return $types;
+}

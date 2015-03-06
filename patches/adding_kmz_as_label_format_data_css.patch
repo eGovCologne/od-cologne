@@ -1,0 +1,19 @@
+diff --git a/profiles/dkan/modules/dkan/dkan_dataset/dkan_dataset.css b/profiles/dkan/modules/dkan/dkan_dataset/dkan_dataset.css
+index 20afb02..0fa3124 100644
+--- a/profiles/dkan/modules/dkan/dkan_dataset/dkan_dataset.css
++++ b/profiles/dkan/modules/dkan/dkan_dataset/dkan_dataset.css
+@@ -325,6 +325,14 @@ padding: 4px 6px;
+   height: 35px;
+   background-position: -192px -62px;
+ }
++
++.format-label[data-format=kmz],
++.format-label[data-format*=kmz] {
++  width: 32px;
++  height: 35px;
++  background-position: 0 -62px;
++}
++
+ .format-label[data-format=HTML],
+ .format-label[data-format=html],
+ .format-label[data-format*=html] {

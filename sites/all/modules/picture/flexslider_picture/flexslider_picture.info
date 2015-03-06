@@ -1,0 +1,15 @@
+name = FlexSlider Picture
+description = Integrates the Picture module with the FlexSlider module for a truly responsive slider.
+package = Picture
+core = 7.x
+
+dependencies[] = picture
+dependencies[] = flexslider
+dependencies[] = flexslider_fields
+
+; Information added by drupal.org packaging script on 2012-12-13
+version = "7.x-1.1"
+core = "7.x"
+project = "picture"
+datestamp = "1355413446"
+

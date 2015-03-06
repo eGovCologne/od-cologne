@@ -1,0 +1,6 @@
+name = Comments Emergency
+description = Comments Emergency / Changes Comment Status by type
+core = 7.x
+version = 7.x-0.1-beta2
+package = Comments Emergency OD Koeln
+

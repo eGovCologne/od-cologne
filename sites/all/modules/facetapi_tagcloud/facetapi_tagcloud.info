@@ -1,0 +1,13 @@
+name = Tagcloud Facets
+description = A Facet API widget that displays facet items as tagadelic links.
+dependencies[] = facetapi
+package = Search Toolkit
+core = 7.x
+files[] = plugins/facetapi/widget_tagcloud.inc
+
+; Information added by drupal.org packaging script on 2011-12-11
+version = "7.x-1.0-beta1"
+core = "7.x"
+project = "facetapi_tagcloud"
+datestamp = "1323633641"
+
